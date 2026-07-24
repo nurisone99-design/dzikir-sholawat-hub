@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -241,6 +241,9 @@ export default function CrudPage({
             <DialogTitle className="font-display text-xl">
               {editing ? "Edit" : "Tambah"} {title}
             </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Lengkapi formulir berikut lalu tekan Simpan.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
             {fields.map((f) => {
