@@ -1,0 +1,84 @@
+{
+  "theme": "light",
+  "design_philosophy": "Modern, Minimalist, Premium, Clean Islamic Visual Touches. Blending modern web patterns with respectful, elegant aesthetics.",
+  "colors": {
+    "primary": "#0F766E",
+    "primary_hover": "#0D5E58",
+    "accent_gold": "#D4AF37",
+    "accent_gold_light": "#C5A059",
+    "text_dark": "#1F2937",
+    "text_muted": "#4B5563",
+    "background": "#FFFFFF",
+    "background_alt": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "border": "rgba(15, 118, 110, 0.1)"
+  },
+  "typography": {
+    "heading_font": "Playfair Display",
+    "body_font": "Plus Jakarta Sans",
+    "strategies": [
+      "Use Playfair Display for Hero, Profile Headings, and major Section Titles to convey respect and heritage.",
+      "Use Plus Jakarta Sans for all body text, dashboard UI, and functional elements for maximum legibility.",
+      "H1: text-5xl sm:text-6xl tracking-tight leading-none",
+      "H2: text-3xl sm:text-4xl tracking-tight",
+      "Body: text-base leading-relaxed text-slate-700"
+    ]
+  },
+  "layouts": {
+    "public_site": "Bento grids for highlights, generous padding (py-24, py-32) for sections. Soft shadows and glassmorphism for floating headers.",
+    "admin_dashboard": "Sidebar layout, cardless or very subtle 12px rounded cards with 1px border. Density is tight for data tables."
+  },
+  "visual_enhancers": {
+    "cards": "box-shadow: 0 4px 20px -2px rgba(0,0,0,0.05), rounded-[16px], border border-emerald-900/5",
+    "glassmorphism": "backdrop-blur-xl bg-white/80 border-b border-emerald-900/10 for header.",
+    "islamic_touches": "Subtle geometric patterns as background watermarks in hero or profile sections (opacity 5%)."
+  },
+  "motion": {
+    "transitions": "hover:-translate-y-1 hover:shadow-lg transition-transform duration-300 ease-in-out",
+    "entrance": "Staggered fade-up for grid items (Framer Motion)."
+  },
+  "component_instructions": {
+    "header": "Sticky navigation, pure white glassmorphism, right-aligned CTA for Login/Contact.",
+    "hero": "Left-aligned text with Playfair Display heading, emerald green primary button, gold accent secondary button. Right side: abstract Islamic geometric pattern or high-quality mosque interior image.",
+    "profile_cards": "Respectful presentation: large image area, Playfair Display for names, gold accent micro-borders. Center alignment for portraits.",
+    "admin_sidebar": "Emerald green background with white text, or white background with emerald active states.",
+    "data_tables": "Shadcn UI tables, clear borders, pagination, robust search/filter header."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "category": "hero_background_or_side",
+        "url": "https://images.unsplash.com/photo-1766166793579-4833898111a5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxtb3NxdWUlMjBhcmNoaXRlY3R1cmUlMjBpbnRlcmlvciUyMGdvbGQlMjBncmVlbnxlbnwwfHx8fDE3ODM4ODMxMDN8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Ornate dome interior with gold accents, use as hero visual or background accent."
+      },
+      {
+        "category": "founder_profile",
+        "url": "https://images.unsplash.com/photo-1627091908405-30bd51eec537",
+        "description": "Respectful portrait placeholder for Pendiri/Penerus if needed, or use abstract architecture."
+      },
+      {
+        "category": "gallery_or_activities",
+        "url": "https://images.pexels.com/photos/30947036/pexels-photo-30947036.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Muslims gathered for prayer, shows unity."
+      },
+      {
+        "category": "architecture_accent",
+        "url": "https://images.pexels.com/photos/5777146/pexels-photo-5777146.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Stunning white colonnades and arches."
+      }
+    ]
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You MUST NOT apply universal transition. Eg: transition: all. Always add transitions for specific interactive elements like button, input excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Never use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "All interactive and key informational elements MUST include a data-testid attribute.",
+    "Use Phosphor Icons or Lucide-react for elegant, modern iconography.",
+    "Create depth through layered design elements with z-index hierarchy and glass-morphism.",
+    "Use sonner for toast notifications, located in /app/src/components/ui/sonner.tsx",
+    "DO NOT use complete transparent background in header or overlays. Ensure readability with proper backdrop blurs.",
+    "Share guidelines for .js files, NOT .tsx files."
+  ]
+}
