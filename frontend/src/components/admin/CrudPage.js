@@ -61,9 +61,21 @@ export default function CrudPage({
           ...o,
           [f.key]: data.map((d) => ({ value: d.id, label: d[f.optionLabel || "nama"] })),
         }));
+        setRawOptions((o) => ({ ...o, [f.key]: data }));
       } catch (_) {}
     });
   }, [fields]);
+
+  // auto-generate id fields based on other selected fields (create mode only)
+  useEffect(() => {
+    if (!open || editing) return;
+    fields.forEach((f) => {
+      if (f.type === "auto_id" && f.compute) {
+        const val = f.compute(form, rows, rawOptions);
+        setForm((p) => (p[f.key] === val ? p : { ...p, [f.key]: val }));
+      }
+    });
+  }, [open, editing, form, rows, rawOptions, fields]);
 
   // load lookup maps for foreign-key column display
   useEffect(() => {
