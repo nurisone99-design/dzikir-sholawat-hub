@@ -16,8 +16,12 @@ const icon = new L.Icon({
 
 export default function Cabang() {
   const [cabang, setCabang] = useState([]);
+  const [mapReady, setMapReady] = useState(false);
 
-  useEffect(() => { api.get("/public/cabang").then((r) => setCabang(r.data)).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get("/public/cabang").then((r) => setCabang(r.data)).catch(() => {});
+    setMapReady(true);
+  }, []);
 
   const markers = cabang.filter((c) => c.lat && c.lng);
   const center = markers.length ? [markers[0].lat, markers[0].lng] : [-2.5, 118];
@@ -37,16 +41,18 @@ export default function Cabang() {
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16">
         <div className="premium-card overflow-hidden mb-12" style={{ height: 420 }} data-testid="cabang-map">
-          <MapContainer center={center} zoom={5} scrollWheelZoom={false} style={{ height: "100%", width: "100%" }}>
-            <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {markers.map((c) => (
-              <Marker key={c.id} position={[c.lat, c.lng]} icon={icon}>
-                <Popup>
-                  <strong>{c.kota}</strong><br />{c.alamat}<br />Ketua: {c.ketua}
-                </Popup>
-              </Marker>
-            ))}
-          </MapContainer>
+          {mapReady && (
+            <MapContainer center={center} zoom={5} scrollWheelZoom={false} style={{ height: "100%", width: "100%" }}>
+              <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              {markers.map((c) => (
+                <Marker key={c.id} position={[c.lat, c.lng]} icon={icon}>
+                  <Popup>
+                    <strong>{c.kota}</strong><br />{c.alamat}<br />Ketua: {c.ketua}
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
