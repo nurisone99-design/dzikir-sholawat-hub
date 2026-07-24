@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Moon, Menu, X, LogIn } from "lucide-react";
+import { Menu, X, LogIn } from "lucide-react";
 
 const LINKS = [
   { to: "/", label: "Beranda" },
   { to: "/profil", label: "Profil Yayasan" },
-  { to: "/pendiri", label: "Pendiri & Penerus" },
+  { to: "/pendiri", label: "Profil Majelis" },
   { to: "/cabang", label: "Cabang & Peta" },
   { to: "/galeri", label: "Galeri" },
   { to: "/kontak", label: "Kontak" },
@@ -27,22 +27,27 @@ export default function PublicNav() {
 
   return (
     <header className={`sticky top-0 z-50 transition-colors duration-300 ${scrolled ? "glass-nav" : "bg-white/95 border-b border-transparent"}`}>
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3" data-testid="nav-logo">
-          <div className="h-10 w-10 rounded-xl bg-emerald-brand flex items-center justify-center">
-            <Moon className="h-5 w-5 text-gold" />
+      <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between gap-3">
+        <Link to="/" className="flex items-center gap-2.5 min-w-0" data-testid="nav-logo">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <img src="/logo-majelis.png" alt="Logo Majelis Raudhatul Jannah" className="h-11 w-11 object-contain" />
+            <img src="/logo-yayasan.png" alt="Logo Yayasan Nurul Islam" className="h-11 w-11 object-contain" />
           </div>
-          <div className="leading-tight">
-            <p className="font-display font-bold text-charcoal text-sm sm:text-base">Raudhatul Jannah</p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Nurul Islam wa Iman</p>
+          <div className="leading-tight min-w-0 hidden sm:block">
+            <p className="font-display font-bold text-charcoal text-[13px] lg:text-sm truncate">
+              Yayasan Raudhatul Jannah Nurul Islam wa Iman
+            </p>
+            <p className="text-[10px] lg:text-[11px] text-primary/80 font-medium truncate">
+              Majelis Dzikir &amp; Sholawat Ma'rifatullah wa Ma'rifaturrosul
+            </p>
           </div>
         </Link>
 
-        <div className="hidden lg:flex items-center gap-1">
+        <div className="hidden lg:flex items-center gap-1 shrink-0">
           {LINKS.map((l) => (
             <NavLink key={l.to} to={l.to}
               className={({ isActive }) =>
-                `px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                `px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                   isActive ? "text-primary bg-primary/8" : "text-charcoal/75 hover:text-primary hover:bg-primary/5"
                 }`}
               data-testid={`nav-link-${l.to === "/" ? "home" : l.to.slice(1)}`}>
@@ -51,7 +56,7 @@ export default function PublicNav() {
           ))}
         </div>
 
-        <div className="hidden lg:block">
+        <div className="hidden lg:block shrink-0">
           <Link to="/admin/login">
             <Button className="rounded-xl gap-2" data-testid="nav-login-btn">
               <LogIn className="h-4 w-4" /> Login Admin
@@ -59,7 +64,7 @@ export default function PublicNav() {
           </Link>
         </div>
 
-        <button className="lg:hidden p-2 -mr-2" onClick={() => setOpen(!open)} data-testid="mobile-nav-toggle">
+        <button className="lg:hidden p-2 -mr-2 shrink-0" onClick={() => setOpen(!open)} data-testid="mobile-nav-toggle">
           {open ? <X className="h-6 w-6 text-charcoal" /> : <Menu className="h-6 w-6 text-charcoal" />}
         </button>
       </nav>

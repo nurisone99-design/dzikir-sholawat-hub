@@ -1,0 +1,45 @@
+{
+  "summary": "Frontend regression testing of iteration-2 changes for Yayasan Raudhatul Jannah admin. Verified: (1) Public navbar dual logos + two-line brand + 'Profil Majelis' renamed link → PASS. (2) Data Jamaah expanded table columns (NIK, Tempat Lahir, Tanggal Lahir, Nama Orang Tua, Alamat) → PASS. (3) Modal renders id_jamaah as disabled+readonly auto_id field, ijazah_nama_dalam as dynamic_list with + add button → PASS. (4) CRITICAL FAIL: auto_id compute function is NEVER invoked in CrudPage.js. Selecting Cabang + Gender does not populate id_jamaah — field stays empty and Save fails with 'ID Jamaah wajib diisi'. Cannot create a jamaah record via the UI. (5) Regression on Cabang/Guru/Pengurus CRUD → PASS (list loads, modal opens).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "CrudPage (auto_id field type)",
+        "issue": "The `compute` prop on auto_id fields (used by DataJamaah for id_jamaah) is defined in field config but never invoked anywhere in /app/frontend/src/components/admin/CrudPage.js. There is no useEffect watching form.cabang_id / form.gender that calls f.compute(form, rows, rawOptions) to update form[f.key]. Also `rawOptions` state is declared (line 32) but `setRawOptions` is never called — so even if compute were wired, it would receive an empty raw.cabang_id array. Result: after selecting Cabang + Gender in the Tambah Data Jamaah modal, the 'ID Jamaah' input stays empty, and Save throws 'ID Jamaah wajib diisi'. Blocks the entire create-jamaah flow.",
+        "selector": "[data-testid='jamaah-field-id_jamaah']",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Create Jamaah (Data Jamaah > Tambah Data > Simpan)",
+        "issue": "Save always fails because id_jamaah cannot be filled (auto_id not computed). User has no way to complete the create flow. Existing seed rows use legacy JAM-#### IDs, not the new BR{cabang}-{L/P}-#### format — new format is unverifiable end-to-end until the compute wiring is fixed.",
+        "affected_selectors": ["[data-testid='jamaah-save-btn']", "[data-testid='jamaah-field-id_jamaah']"]
+      }
+    ],
+    "design_issues": [
+      {"screen": "Tambah Data Jamaah modal", "issues": ["Radix DialogContent missing aria-describedby / Description — console warning (accessibility)."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_1.json"],
+  "action_items": [
+    "In /app/frontend/src/components/admin/CrudPage.js: (a) populate rawOptions when loading optionsFrom data — e.g. setRawOptions((o) => ({ ...o, [f.key]: data })); (b) add a useEffect that, whenever `form` or `rows` change, iterates fields.filter(f => f.type === 'auto_id' && f.compute) and calls setForm to set form[f.key] = f.compute(form, rows, rawOptions) — only when it differs, to avoid loops; (c) ensure the auto_id useEffect is scoped to when creating (not editing), or re-computes only if form[f.key] is empty, so editing existing rows keeps their persisted id.",
+    "Verify new ID format BR{cabang}-{L/P}-#### matches backend expectations (backend may still validate JAM-#### pattern — needs backend regex check).",
+    "Add aria-describedby / DialogDescription to CrudPage Dialog to remove Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "CrudPage.js line 32: `rawOptions` state defined but setter never called — dead state.",
+    "CrudPage.js: no handler wires the `f.compute` callback of auto_id fields — the feature is inert.",
+    "DataJamaah.js computeJamaahId uses `rows.filter(...).length + 1` — race prone: if two admins add simultaneously, both get the same seq. Consider computing on the backend or at save time only.",
+    "computeJamaahId derives cabang code from `cabang.id_cabang` (backend field) via digit-strip; if id_cabang naming changes this silently returns '00'. Should validate.",
+    "Existing seed jamaah still use JAM-#### IDs; migration/reformat plan needed if new BR format is authoritative."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (previous iteration 100%)", "frontend": "60% (nav OK, table OK, modal OK, but create flow broken due to auto_id not computing)"},
+  "test_credentials": "admin@raudhatuljannah.id / Admin@2026 (from review_request)",
+  "seed_data_creation": "None — create attempt aborted by auto_id bug (no TEST_ record persisted; row count unchanged 8→8).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After main agent wires up compute for auto_id (setRawOptions in optionsFrom loader + useEffect calling f.compute), retest: open Tambah Data on /admin/jamaah, select any Cabang and Gender, verify id_jamaah auto-populates with pattern BR\\d{2}-[LP]-\\d{4}, then fill remaining fields, add 2 Nama Dalam via [data-testid='jamaah-add-ijazah_nama_dalam'], click Simpan, and verify new row appears in table with the computed ID. Clean up any TEST_ rows via delete button. Route is /admin/jamaah (NOT /admin/data-jamaah).",
+  "rca of the issue": "Root cause: In /app/frontend/src/components/admin/CrudPage.js, the `auto_id` field type was added to render a disabled input, but the reactive logic to compute its value from other form fields is missing. The `compute` function attached to the field config (DataJamaah.js line 64) is never called anywhere. Additionally, `rawOptions` (which the compute function needs to look up cabang data by id) is declared as state but never populated by the optionsFrom loader (line 55-66 only sets `options` with mapped {value,label} pairs, discarding the raw cabang objects). Reproduction: login as admin → /admin/jamaah → Tambah Data → select any Cabang → select Gender → observe id_jamaah remains empty → click Simpan → toast 'ID Jamaah wajib diisi'. Mitigation: (1) in the optionsFrom useEffect, also call setRawOptions((o) => ({...o, [f.key]: data})) alongside setOptions; (2) add a useEffect with deps [form, rows, rawOptions] that iterates auto_id fields and setForm to include computed value when it changes."
+}

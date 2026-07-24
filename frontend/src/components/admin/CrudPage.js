@@ -29,6 +29,7 @@ export default function CrudPage({
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [options, setOptions] = useState(extraOptions);
+  const [rawOptions, setRawOptions] = useState({});
   const [lookupMaps, setLookupMaps] = useState({});
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -86,7 +87,9 @@ export default function CrudPage({
 
   const openCreate = () => {
     const init = {};
-    fields.forEach((f) => { init[f.key] = f.type === "tags" ? [] : f.type === "number" ? "" : ""; });
+    fields.forEach((f) => {
+      init[f.key] = f.type === "tags" ? [] : f.type === "dynamic_list" ? [""] : "";
+    });
     setForm(init);
     setEditing(null);
     setOpen(true);
@@ -94,7 +97,13 @@ export default function CrudPage({
 
   const openEdit = (row) => {
     const init = {};
-    fields.forEach((f) => { init[f.key] = row[f.key] ?? (f.type === "tags" ? [] : ""); });
+    fields.forEach((f) => {
+      if (f.type === "dynamic_list") {
+        init[f.key] = Array.isArray(row[f.key]) && row[f.key].length ? row[f.key] : [""];
+      } else {
+        init[f.key] = row[f.key] ?? (f.type === "tags" ? [] : "");
+      }
+    });
     setForm(init);
     setEditing(row);
     setOpen(true);
@@ -109,7 +118,10 @@ export default function CrudPage({
     }
     setSaving(true);
     const payload = { ...form };
-    fields.forEach((f) => { if (f.type === "number") payload[f.key] = Number(payload[f.key] || 0); });
+    fields.forEach((f) => {
+      if (f.type === "number") payload[f.key] = Number(payload[f.key] || 0);
+      if (f.type === "dynamic_list") payload[f.key] = (form[f.key] || []).map((s) => s.trim()).filter(Boolean);
+    });
     try {
       if (editing) {
         await api.put(`/${endpoint}/${editing.id}`, payload);
@@ -222,7 +234,7 @@ export default function CrudPage({
             {fields.map((f) => {
               const opts = f.options || options[f.key] || [];
               return (
-                <div key={f.key} className={f.full || f.type === "tags" || f.type === "textarea" ? "sm:col-span-2" : ""}>
+                <div key={f.key} className={f.full || f.type === "tags" || f.type === "textarea" || f.type === "dynamic_list" ? "sm:col-span-2" : ""}>
                   <Label className="mb-1.5 block text-sm">
                     {f.label} {f.required && <span className="text-destructive">*</span>}
                   </Label>
@@ -256,6 +268,38 @@ export default function CrudPage({
                           </button>
                         );
                       })}
+                    </div>
+                  ) : f.type === "auto_id" ? (
+                    <Input value={form[f.key] || ""} disabled readOnly
+                      className="rounded-xl bg-secondary/60 font-mono text-charcoal"
+                      placeholder="Otomatis dari Cabang & Gender"
+                      data-testid={`${endpoint}-field-${f.key}`} />
+                  ) : f.type === "dynamic_list" ? (
+                    <div className="space-y-2">
+                      {(form[f.key] || [""]).map((val, idx) => (
+                        <div key={idx} className="flex gap-2">
+                          <Input value={val} className="rounded-xl"
+                            placeholder={f.placeholder || `${f.label} ${idx + 1}`}
+                            onChange={(e) => {
+                              const arr = [...(form[f.key] || [""])];
+                              arr[idx] = e.target.value;
+                              setForm((p) => ({ ...p, [f.key]: arr }));
+                            }}
+                            data-testid={`${endpoint}-field-${f.key}-${idx}`} />
+                          {(form[f.key] || []).length > 1 && (
+                            <Button type="button" variant="ghost" size="icon" className="h-10 w-10 shrink-0"
+                              onClick={() => setForm((p) => ({ ...p, [f.key]: p[f.key].filter((_, i) => i !== idx) }))}
+                              data-testid={`${endpoint}-remove-${f.key}`}>
+                              <X className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      <Button type="button" variant="outline" size="sm" className="rounded-xl gap-1.5 border-gold text-gold hover:bg-gold/5"
+                        onClick={() => setForm((p) => ({ ...p, [f.key]: [...(p[f.key] || [""]), ""] }))}
+                        data-testid={`${endpoint}-add-${f.key}`}>
+                        <Plus className="h-4 w-4" /> {f.addLabel || `Tambah ${f.label}`}
+                      </Button>
                     </div>
                   ) : (
                     <Input type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}

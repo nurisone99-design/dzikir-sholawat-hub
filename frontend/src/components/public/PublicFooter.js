@@ -12,17 +12,18 @@ export default function PublicFooter() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 grid grid-cols-1 md:grid-cols-4 gap-10">
         <div className="md:col-span-2">
           <div className="flex items-center gap-3 mb-4">
-            <div className="h-11 w-11 rounded-xl bg-gold flex items-center justify-center">
-              <Moon className="h-5 w-5 text-emerald-900" />
+            <div className="flex items-center gap-1.5 bg-white/95 rounded-xl px-2.5 py-2">
+              <img src="/logo-majelis.png" alt="Logo Majelis" className="h-10 w-10 object-contain" />
+              <img src="/logo-yayasan.png" alt="Logo Yayasan" className="h-10 w-10 object-contain" />
             </div>
             <div>
-              <p className="font-display font-bold text-lg">Raudhatul Jannah</p>
+              <p className="font-display font-bold text-base leading-tight">Yayasan Raudhatul Jannah</p>
               <p className="text-white/60 text-xs">Nurul Islam wa Iman</p>
             </div>
           </div>
           <p className="text-white/70 text-sm leading-relaxed max-w-md">
-            {s.nama || "Yayasan Raudhatul Jannah Nurul Islam wa Iman"} — Majelis Dzikir dan Sholawat
-            yang menaungi kebersamaan spiritual jamaah dalam menuju ridha Allah SWT.
+            {s.nama || "Yayasan Raudhatul Jannah Nurul Islam wa Iman"} — Majelis Dzikir &amp; Sholawat
+            Ma'rifatullah wa Ma'rifaturrosul yang menaungi kebersamaan spiritual jamaah dalam menuju ridha Allah SWT.
           </p>
           <div className="flex gap-3 mt-5">
             {s.instagram && <a href={s.instagram} target="_blank" rel="noreferrer" className="h-9 w-9 rounded-lg bg-white/10 hover:bg-gold hover:text-emerald-900 flex items-center justify-center transition-colors"><Instagram className="h-4 w-4" /></a>}
