@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only e2e verification for Cabang & Guru form redesign. ALL requested checks PASS. (1) Cabang: after picking Guru 'Ustadz Abdullah Gymnastiar' from cabang-field-guru_id, id_cabang auto-populated 'G06-CB-01' matching G\\d{2}-CB-\\d{2} and is disabled/readOnly. Leaflet map (cabang-map-picker) click set coords ('Koordinat: -2.46018, 117.94922'). Filled kota/ketua/no_hp/alamat, cabang-save-btn -> success toast; new row 'G06-CB-01 | TEST_KotaX | Ustadz Abdullah Gymnastiar | TEST_Ketua | 08123456789 | TEST alamat cabang' visible; Guru Pembimbing column resolves to guru name via lookups. (2) Guru: id_guru auto = 'GUR-0007' matches GUR-\\d{4} and disabled; there is NO guru-field-jumlah_jamaah input (verified count=0); Cabang Bimbingan checkbox_group shows 6 options and multi-select works; Ijazah Kitab (4), Ijazah Amaliah (4) checkbox groups; +Tambah Nama Dalam added a 2nd input and both saved; guru-file-foto & guru-file-sk uploads present; Simpan -> success toast; new row 'GUR-0007 | TEST_Guru Auto | TEST_KotaX, Banjarmasin | jumlah=3 | 08111222333'. Backend enrichment (_enrich_guru) confirmed working: jumlah_jamaah=3 computed from bound cabang; cabang_nama joined ('TEST_KotaX, Banjarmasin'). Existing GUR-0006 (Ustadz Abdullah Gymnastiar/Banjarmasin) shows jamaah=3 as documented. (3) Regression: /admin/jamaah (5 rows) and /admin/pengurus (5 rows) still load & render correctly with shared CrudPage. All test data cleaned up (guru via UI delete; cabang via API delete after dev overlay blocked UI delete).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Data Cabang - Tambah/Edit modal with MapPicker", "issues": ["Leaflet MapContainer triggers 'ResizeObserver loop completed with undelivered notifications' which the CRA dev overlay treats as an Uncaught runtime error and displays a full-screen red overlay. This is non-blocking in production builds (webpack dev overlay only) but obstructs subsequent UI clicks during dev/automation. Recommend: (a) suppress ResizeObserver benign error via a window 'error' listener in index.js, or (b) wrap Leaflet resize in requestAnimationFrame/debounce, or (c) disable CRA overlay in dev via FAST_REFRESH-compatible patch. Impact during Playwright: after cabang save, the trash-row delete click was intercepted by the overlay in one run."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "Suppress benign ResizeObserver loop error emitted by react-leaflet so the CRA dev overlay does not blank the screen (production is unaffected)."
+  ],
+  "critical_code_review_comments": [
+    "DataCabang computeCabangId derives the prefix from digits of the guru's id_guru (slice(-2) of GUR-#### -> last 2 digits). For GUR-0006 this yields G06 which happens to match ordinal 6, but for GUR-0010+ the last two digits become 10, so the code becomes G10 while it may look like a natural G10 label. Only cosmetic — pattern regex G\\d{2}-CB-\\d{2} still matches. Consider using an explicit guru sequence field or the full 4-digit code (G0006-CB-01) if scale >99 gurus is expected.",
+    "Sequence numbering (rows.filter(guru_id).length + 1) is race-prone for concurrent creates in both DataCabang and DataGuru — same caveat as prior iteration; move to backend if concurrency matters.",
+    "FileUpload stores images as base64 data URLs inside MongoDB documents; a single 4MB image (limit) inflates the doc ~5.4MB after base64. Multiple such docs will hit MongoDB's 16MB document limit for `guru` collection and slow /api/guru list responses drastically. Recommend moving to object storage or GridFS."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested this iteration (already verified upstream)", "frontend": "100% for all four requested scenarios"},
+  "test_credentials": "admin@raudhatuljannah.id / Admin@2026 (from /app/memory/test_credentials.md via prior iterations)",
+  "seed_data_creation": "Created 1 TEST cabang (G06-CB-01/TEST_KotaX) and 1 TEST guru (GUR-0007/TEST_Guru Auto). Both removed by end of test — cabang collection back to 5 baseline rows, guru back to baseline.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend URL: https://dzikir-sholawat-hub.preview.emergentagent.com. Login flow: navigate to /admin/login (or click 'Login Admin' on landing), fill [data-testid=login-email] + [data-testid=login-password], click Masuk. New field types in CrudPage: 'checkbox_group' emits multiple [data-testid={endpoint}-cb-{key}] buttons (toggle), 'map' emits [data-testid=cabang-map-picker] with .leaflet-container inside, 'file' emits [data-testid={endpoint}-file-{key}] hidden input (use set_input_files). Radix Select still needs 400ms wait after opening. If ResizeObserver overlay appears during a run, either dismiss the dev overlay iframe or refresh the page. Delete confirm uses [data-testid={endpoint}-confirm-delete]."
+}

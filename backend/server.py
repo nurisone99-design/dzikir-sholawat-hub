@@ -266,10 +266,74 @@ def make_crud(name: str, collection: str):
         await log_action(user, "DELETE", collection, f"Bulk hapus {len(ids)} data")
         return {"message": f"{len(ids)} data dihapus"}
 
-for _n, _c in [("cabang", "cabang"), ("guru", "guru"), ("jamaah", "jamaah"),
+for _n, _c in [("cabang", "cabang"), ("jamaah", "jamaah"),
                ("pengurus", "pengurus"), ("agenda", "agenda"), ("galeri", "galeri"),
                ("pengumuman", "pengumuman")]:
     make_crud(_n, _c)
+
+# ------------------------------------------------------------------ guru (computed jumlah_jamaah + multi-cabang)
+async def _enrich_guru(docs):
+    cabang_map = {str(c["_id"]): c.get("kota", "") for c in await db.cabang.find().to_list(1000)}
+    out = []
+    for d in docs:
+        d = serialize(d)
+        cids = d.get("cabang_ids") or ([d["cabang_id"]] if d.get("cabang_id") else [])
+        d["cabang_ids"] = cids
+        d["cabang_nama"] = ", ".join([cabang_map[c] for c in cids if cabang_map.get(c)]) or "-"
+        total = 0
+        for cid in cids:
+            total += await db.jamaah.count_documents({"cabang_id": cid})
+        d["jumlah_jamaah"] = total
+        out.append(d)
+    return out
+
+@api_router.get("/guru")
+async def list_guru(user: dict = Depends(get_current_user)):
+    docs = await db.guru.find().sort("created_at", -1).to_list(5000)
+    return await _enrich_guru(docs)
+
+@api_router.get("/guru/{item_id}")
+async def get_guru(item_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.guru.find_one({"_id": ObjectId(item_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    return (await _enrich_guru([doc]))[0]
+
+@api_router.post("/guru")
+async def create_guru(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_write(user)
+    for k in ("id", "cabang_nama", "jumlah_jamaah"):
+        payload.pop(k, None)
+    payload["created_at"] = now_iso()
+    payload["updated_at"] = now_iso()
+    res = await db.guru.insert_one(payload)
+    await log_action(user, "CREATE", "guru", payload.get("nama", ""))
+    return (await _enrich_guru([await db.guru.find_one({"_id": res.inserted_id})]))[0]
+
+@api_router.put("/guru/{item_id}")
+async def update_guru(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_write(user)
+    for k in ("id", "_id", "cabang_nama", "jumlah_jamaah"):
+        payload.pop(k, None)
+    payload["updated_at"] = now_iso()
+    await db.guru.update_one({"_id": ObjectId(item_id)}, {"$set": payload})
+    await log_action(user, "UPDATE", "guru", item_id)
+    return (await _enrich_guru([await db.guru.find_one({"_id": ObjectId(item_id)})]))[0]
+
+@api_router.delete("/guru/{item_id}")
+async def delete_guru(item_id: str, user: dict = Depends(get_current_user)):
+    require_write(user)
+    await db.guru.delete_one({"_id": ObjectId(item_id)})
+    await log_action(user, "DELETE", "guru", item_id)
+    return {"message": "Data dihapus"}
+
+@api_router.post("/guru/bulk-delete")
+async def bulk_delete_guru(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_write(user)
+    ids = [ObjectId(i) for i in payload.get("ids", [])]
+    await db.guru.delete_many({"_id": {"$in": ids}})
+    await log_action(user, "DELETE", "guru", f"Bulk hapus {len(ids)} data")
+    return {"message": f"{len(ids)} data dihapus"}
 
 # ------------------------------------------------------------------ public endpoints (no auth)
 @api_router.get("/public/stats")

@@ -19,6 +19,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Plus, X } from "lucide-react";
+import MapPicker from "@/components/admin/MapPicker";
+import FileUpload from "@/components/admin/FileUpload";
 
 export default function CrudPage({
   title, subtitle, endpoint, columns, fields, searchKeys, filters = [],
@@ -100,7 +102,10 @@ export default function CrudPage({
   const openCreate = () => {
     const init = {};
     fields.forEach((f) => {
-      init[f.key] = f.type === "tags" ? [] : f.type === "dynamic_list" ? [""] : "";
+      if (f.type === "map") { init[f.latKey || "lat"] = ""; init[f.lngKey || "lng"] = ""; }
+      else if (f.type === "tags" || f.type === "checkbox_group") init[f.key] = [];
+      else if (f.type === "dynamic_list") init[f.key] = [""];
+      else init[f.key] = "";
     });
     setForm(init);
     setEditing(null);
@@ -110,10 +115,15 @@ export default function CrudPage({
   const openEdit = (row) => {
     const init = {};
     fields.forEach((f) => {
-      if (f.type === "dynamic_list") {
+      if (f.type === "map") {
+        init[f.latKey || "lat"] = row[f.latKey || "lat"] ?? "";
+        init[f.lngKey || "lng"] = row[f.lngKey || "lng"] ?? "";
+      } else if (f.type === "dynamic_list") {
         init[f.key] = Array.isArray(row[f.key]) && row[f.key].length ? row[f.key] : [""];
+      } else if (f.type === "tags" || f.type === "checkbox_group") {
+        init[f.key] = Array.isArray(row[f.key]) ? row[f.key] : [];
       } else {
-        init[f.key] = row[f.key] ?? (f.type === "tags" ? [] : "");
+        init[f.key] = row[f.key] ?? "";
       }
     });
     setForm(init);
@@ -316,6 +326,35 @@ export default function CrudPage({
                         <Plus className="h-4 w-4" /> {f.addLabel || `Tambah ${f.label}`}
                       </Button>
                     </div>
+                  ) : f.type === "checkbox_group" ? (
+                    <div className="flex flex-wrap gap-2">
+                      {(f.options || options[f.key] || []).map((o) => {
+                        const val = typeof o === "string" ? o : o.value;
+                        const lab = typeof o === "string" ? o : o.label;
+                        const active = (form[f.key] || []).includes(val);
+                        return (
+                          <button type="button" key={val} onClick={() => toggleTag(f.key, val)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
+                              active ? "bg-primary text-white border-primary" : "bg-white text-charcoal border-border hover:border-primary"
+                            }`}
+                            data-testid={`${endpoint}-cb-${f.key}`}>
+                            <span className={`h-3.5 w-3.5 rounded border flex items-center justify-center ${active ? "bg-white border-white" : "border-muted-foreground/40"}`}>
+                              {active && <span className="h-1.5 w-1.5 rounded-sm bg-primary" />}
+                            </span>
+                            {lab}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : f.type === "map" ? (
+                    <MapPicker
+                      value={{ lat: form[f.latKey || "lat"], lng: form[f.lngKey || "lng"] }}
+                      onChange={({ lat, lng }) => setForm((p) => ({ ...p, [f.latKey || "lat"]: lat, [f.lngKey || "lng"]: lng }))}
+                    />
+                  ) : f.type === "file" ? (
+                    <FileUpload value={form[f.key]} accept={f.accept} aspect={f.aspect}
+                      onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+                      testid={`${endpoint}-file-${f.key}`} />
                   ) : (
                     <Input type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
                       value={form[f.key] ?? ""} className="rounded-xl"
