@@ -43,15 +43,27 @@ export default function Home() {
     api
       .get("/public/stats")
       .then((r) => setStats(r.data))
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Gagal memuat statistik:", err);
+
+        setStats({});
+      });
     api
       .get("/public/pengumuman")
       .then((r) => setAnnouncements(r.data.slice(0, 3)))
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Gagal memuat pengumuman:", err);
+
+        setAnnouncements([]);
+      });
     api
       .get("/public/agenda")
       .then((r) => setAgenda(r.data.slice(0, 3)))
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Gagal memuat agenda:", err);
+
+        setAgenda([]);
+      });
   }, []);
 
   return (

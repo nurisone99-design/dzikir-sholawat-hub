@@ -3,6 +3,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 import os
 import io
 from PIL import Image
@@ -31,14 +37,31 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # ------------------------------------------------------------------ config
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
-db = client[os.environ['DB_NAME']]
+mongo_url = require_env("MONGO_URL")
+db_name = require_env("DB_NAME")
+JWT_SECRET = require_env("JWT_SECRET")
 
-JWT_SECRET = os.environ['JWT_SECRET']
+client = AsyncIOMotorClient(
+    mongo_url,
+    tlsCAFile=certifi.where()
+)
+
+db = client[db_name]
+
 JWT_ALGORITHM = "HS256"
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+# Allowed CORS Origins
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000"
+    ).split(",")
+    if origin.strip()
+]
 
 # Direktori Penyimpanan Upload Gambar
 UPLOAD_DIR = ROOT_DIR / "uploads"
@@ -46,6 +69,8 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+logger.info("Allowed Origins: %s", ALLOWED_ORIGINS)
 
 app = FastAPI(title="Yayasan Raudhatul Jannah API")
 api_router = APIRouter(prefix="/api")
@@ -760,8 +785,13 @@ async def export_data(entity: str,
 app.include_router(api_router)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-app.add_middleware(CORSMiddleware, allow_credentials=False,
-                   allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=False,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def startup():

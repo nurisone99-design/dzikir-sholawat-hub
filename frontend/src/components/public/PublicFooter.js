@@ -17,7 +17,9 @@ export default function PublicFooter() {
     api
       .get("/public/settings")
       .then((r) => setS(r.data || {}))
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Gagal memuat pengaturan footer:", err);
+      });
   }, []);
 
   return (

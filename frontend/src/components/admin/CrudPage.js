@@ -85,19 +85,29 @@ export default function CrudPage({
   // load dynamic options for select fields (optionsFrom)
   useEffect(() => {
     const dyn = fields.filter((f) => f.optionsFrom);
-    dyn.forEach(async (f) => {
-      try {
-        const { data } = await api.get(`/${f.optionsFrom}`);
-        setOptions((o) => ({
-          ...o,
-          [f.key]: data.map((d) => ({
-            value: d.id,
-            label: d[f.optionLabel || "nama"],
-          })),
-        }));
-        setRawOptions((o) => ({ ...o, [f.key]: data }));
-      } catch (_) {}
-    });
+
+    Promise.all(
+      dyn.map(async (f) => {
+        try {
+          const { data } = await api.get(`/${f.optionsFrom}`);
+
+          setOptions((o) => ({
+            ...o,
+            [f.key]: data.map((d) => ({
+              value: d.id,
+              label: d[f.optionLabel || "nama"],
+            })),
+          }));
+
+          setRawOptions((o) => ({
+            ...o,
+            [f.key]: data,
+          }));
+        } catch (err) {
+          console.error(`Gagal memuat opsi ${f.optionsFrom}:`, err);
+        }
+      }),
+    );
   }, [fields]);
 
   // auto-generate id fields based on other selected fields (create mode only)
@@ -113,16 +123,20 @@ export default function CrudPage({
 
   // load lookup maps for foreign-key column display
   useEffect(() => {
-    lookups.forEach(async (lk) => {
-      try {
-        const { data } = await api.get(`/${lk.from}`);
-        const map = {};
-        data.forEach((d) => {
-          map[d.id] = d[lk.labelKey];
-        });
-        setLookupMaps((m) => ({ ...m, [lk.key]: map }));
-      } catch (_) {}
-    });
+    Promise.all(
+      lookups.map(async (lk) => {
+        try {
+          const { data } = await api.get(`/${lk.from}`);
+          const map = {};
+          data.forEach((d) => {
+            map[d.id] = d[lk.labelKey];
+          });
+          setLookupMaps((m) => ({ ...m, [lk.key]: map }));
+        } catch (err) {
+          console.error(`Gagal memuat lookup ${lk.from}:`, err);
+        }
+      }),
+    );
   }, [lookups]);
 
   const resolvedColumns = columns.map((c) => {

@@ -17,7 +17,9 @@ export function AuthProvider({ children }) {
     api
       .get("/auth/me")
       .then((res) => setUser(res.data))
-      .catch(() => {
+      .catch((err) => {
+        console.warn("Autentikasi gagal:", err);
+
         localStorage.removeItem("rj_token");
         setUser(false);
       })
@@ -40,7 +42,9 @@ export function AuthProvider({ children }) {
   const isSuper = user && user.role === "super_admin";
 
   return (
-    <AuthContext.Provider value={{ user, setUser, ready, login, logout, isViewer, isSuper }}>
+    <AuthContext.Provider
+      value={{ user, setUser, ready, login, logout, isViewer, isSuper }}
+    >
       {children}
     </AuthContext.Provider>
   );
