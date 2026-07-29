@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
@@ -41,6 +42,10 @@ function ProtectedRoute({ children }) {
 }
 
 function App() {
+  useEffect(() => {
+    document.documentElement.lang = "id";
+  }, []);
+
   return (
     <div className="App">
       <AuthProvider>
@@ -64,7 +69,10 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+              <Route
+                index
+                element={<Navigate to="/admin/dashboard" replace />}
+              />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="cabang" element={<DataCabang />} />
               <Route path="guru" element={<DataGuru />} />

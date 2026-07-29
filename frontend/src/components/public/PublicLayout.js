@@ -5,7 +5,9 @@ import PublicFooter from "@/components/public/PublicFooter";
 
 export default function PublicLayout() {
   const { pathname } = useLocation();
-  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <PublicNav />

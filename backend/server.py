@@ -5,13 +5,18 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+from PIL import Image
 import logging
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Any, Dict, Annotated
+import certifi
+from pymongo import MongoClient
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query
+
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -27,13 +32,17 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # ------------------------------------------------------------------ config
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
 db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
+
+# Direktori Penyimpanan Upload Gambar
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,6 +78,44 @@ def serialize(doc: Optional[dict]) -> Optional[dict]:
     doc["id"] = str(doc.pop("_id"))
     doc.pop("password_hash", None)
     return doc
+
+def compress_and_convert_to_webp(image_bytes: bytes, max_size_kb: int = 50) -> bytes:
+    """ Mengompres dan mengonversi gambar ke format WEBP dengan target ukuran <= max_size_kb KB """
+    img = Image.open(io.BytesIO(image_bytes))
+    
+    # Konversi RGBA / Palette ke RGB agar kompatibel saat dikonversi ke WebP
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+        
+    quality = 85
+    output = io.BytesIO()
+    
+    # Batasi dimensi maksimal (1200px) untuk foto berukuran besar
+    max_dim = 1200
+    if max(img.width, img.height) > max_dim:
+        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+    # Loop penyesuaian kualitas & dimensi hingga ukuran <= 50 KB
+    while True:
+        output.seek(0)
+        output.truncate(0)
+        
+        img.save(output, format="WEBP", quality=quality, optimize=True)
+        size_kb = output.tell() / 1024
+        
+        if size_kb <= max_size_kb or quality <= 10:
+            break
+            
+        quality -= 5
+        
+        # Jika kualitas sudah di bawah 20 namun masih > 50KB, turunkan resolusi pikselnya
+        if quality < 20 and size_kb > max_size_kb:
+            new_w = int(img.width * 0.8)
+            new_h = int(img.height * 0.8)
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            quality = 50
+
+    return output.getvalue()
 
 async def get_current_user(request: Request,
                            creds: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
@@ -176,6 +223,41 @@ async def change_password(data: PasswordChange, user: dict = Depends(get_current
     await log_action(user, "UPDATE", "auth", "Ubah kata sandi")
     return {"message": "Kata sandi berhasil diubah"}
 
+# ------------------------------------------------------------------ upload router
+@api_router.post("/upload")
+async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    require_write(user)
+    
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File yang diunggah harus berupa gambar")
+        
+    contents = await file.read()
+    
+    try:
+        # Kompresi & Ubah format ke WEBP (Max 50KB)
+        compressed_bytes = compress_and_convert_to_webp(contents, max_size_kb=50)
+        
+        # Buat nama file unik
+        base_name = Path(file.filename).stem
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        new_filename = f"{base_name}_{timestamp}.webp"
+        file_path = UPLOAD_DIR / new_filename
+        
+        # Simpan file
+        with open(file_path, "wb") as f:
+            f.write(compressed_bytes)
+            
+        await log_action(user, "CREATE", "upload", f"Upload gambar: {new_filename}")
+        
+        return {
+            "status": "success",
+            "filename": new_filename,
+            "url": f"/uploads/{new_filename}"
+        }
+    except Exception as e:
+        logger.error(f"Gagal memproses gambar: {str(e)}")
+        raise HTTPException(status_code=500, detail="Terjadi kesalahan saat memproses gambar")
+
 # ------------------------------------------------------------------ user management
 @api_router.get("/users")
 async def list_users(user: dict = Depends(get_current_user)):
@@ -271,7 +353,7 @@ for _n, _c in [("cabang", "cabang"), ("jamaah", "jamaah"),
                ("pengumuman", "pengumuman")]:
     make_crud(_n, _c)
 
-# ------------------------------------------------------------------ guru (computed jumlah_jamaah + multi-cabang)
+# ------------------------------------------------------------------ guru
 async def _enrich_guru(docs):
     cabang_map = {str(c["_id"]): c.get("kota", "") for c in await db.cabang.find().to_list(1000)}
     out = []
@@ -335,7 +417,7 @@ async def bulk_delete_guru(payload: Dict[str, Any], user: dict = Depends(get_cur
     await log_action(user, "DELETE", "guru", f"Bulk hapus {len(ids)} data")
     return {"message": f"{len(ids)} data dihapus"}
 
-# ------------------------------------------------------------------ public endpoints (no auth)
+# ------------------------------------------------------------------ public endpoints
 @api_router.get("/public/stats")
 async def public_stats():
     return {
@@ -400,13 +482,11 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
     total_jamaah = await db.jamaah.count_documents({})
     now = datetime.now(timezone.utc).isoformat()
     active_events = await db.agenda.count_documents({"tanggal": {"$gte": now[:10]}})
-    # jamaah per cabang
     cabang_list = await db.cabang.find().to_list(1000)
     per_cabang = []
     for c in cabang_list:
         cnt = await db.jamaah.count_documents({"cabang_id": str(c["_id"])})
         per_cabang.append({"kota": c.get("kota", "-"), "jamaah": cnt})
-    # gender split
     male = await db.jamaah.count_documents({"gender": "Laki-laki"})
     female = await db.jamaah.count_documents({"gender": "Perempuan"})
     upcoming = await db.agenda.find({"tanggal": {"$gte": now[:10]}}).sort("tanggal", 1).to_list(5)
@@ -472,75 +552,191 @@ async def restore(payload: Dict[str, Any], user: dict = Depends(get_current_user
     await log_action(user, "UPDATE", "restore", "Restore database")
     return {"message": "Database berhasil dipulihkan"}
 
-# ------------------------------------------------------------------ export
-COLUMN_MAP = {
-    "cabang": [("id_cabang", "ID Cabang"), ("kota", "Kota"), ("alamat", "Alamat"),
-               ("ketua", "Ketua Cabang"), ("no_hp", "No. HP/WA")],
-    "guru": [("id_guru", "ID Guru"), ("nama", "Nama Lengkap"), ("cabang_nama", "Cabang"),
-             ("jumlah_jamaah", "Jumlah Jamaah")],
-    "jamaah": [("id_jamaah", "ID Jamaah"), ("nama", "Nama Lengkap"), ("nik", "NIK"),
-               ("gender", "Gender"), ("tempat_lahir", "Tempat Lahir"), ("tanggal_lahir", "Tgl Lahir"),
-               ("alamat", "Alamat"), ("cabang_nama", "Cabang")],
-    "pengurus": [("id_pengurus", "ID Pengurus"), ("nama", "Nama"), ("jabatan", "Jabatan"),
-                 ("cabang_nama", "Cabang"), ("alamat", "Alamat"), ("no_hp", "No. HP/WA")],
-    "agenda": [("judul", "Judul"), ("tanggal", "Tanggal"), ("waktu", "Waktu"),
-               ("lokasi", "Lokasi"), ("deskripsi", "Deskripsi")],
+# ------------------------------------------------------------------ EXPORT HANDLER
+COLUMN_TITLE_MAP = {
+    "id": "ID",
+    "id_jamaah": "ID Jamaah",
+    "id_guru": "ID Guru",
+    "id_cabang": "ID Cabang",
+    "id_pengurus": "ID Pengurus",
+    "nama": "Nama Lengkap",
+    "nik": "NIK / No. KTP",
+    "no_ktp": "NIK / No. KTP",
+    "gender": "Gender",
+    "tempat_lahir": "Tempat Lahir",
+    "tanggal_lahir": "Tanggal Lahir",
+    "alamat": "Alamat",
+    "cabang": "Cabang",
+    "cabang_nama": "Cabang",
+    "no_hp": "No. HP / WA",
+    "nama_ortu": "Nama Orang Tua",
+    "nama_orang_tua": "Nama Orang Tua",
+    "ijazah_kitab": "Ijazah Kitab",
+    "ijazah_amaliah": "Ijazah Amaliah",
+    "ijazah_nama_dalam": "Ijazah Nama Dalam",
+    "ketua": "Ketua",
+    "jabatan": "Jabatan",
+    "judul": "Judul",
+    "tanggal": "Tanggal",
+    "waktu": "Waktu",
+    "lokasi": "Lokasi",
+    "deskripsi": "Deskripsi",
+    "jumlah_jamaah": "Jumlah Jamaah",
+    "kota": "Kota"
 }
 
+DEFAULT_COLUMNS = {
+    "jamaah": ["id", "nama", "nik", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "no_hp", "nama_ortu", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
+    "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah"],
+    "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],
+    "agenda": ["judul", "tanggal", "waktu", "lokasi", "deskripsi"],
+}
+
+@api_router.get("/export-options/cabang")
+async def get_export_cabang_options():
+    """ Helper API untuk Frontend menampilkan Nama Kota pada Checkbox / Select Cabang """
+    docs = await db.cabang.find().sort("kota", 1).to_list(1000)
+    return [{"id": str(d["_id"]), "nama": d.get("kota") or d.get("nama") or "Cabang Tanpa Nama"} for d in docs]
+
 async def build_rows(entity: str, filters: dict):
-    cabang_map = {str(c["_id"]): c.get("kota", "") for c in await db.cabang.find().to_list(1000)}
+    # Load dictionary cabang: id_string -> nama_kota
+    cabang_docs = await db.cabang.find().to_list(1000)
+    cabang_map = {}
+    for c in cabang_docs:
+        c_id = str(c["_id"])
+        cabang_map[c_id] = c.get("kota") or c.get("nama") or "-"
+
     docs = await db[entity].find(filters).to_list(100000)
     rows = []
+    
     for i, d in enumerate(docs, 1):
         d = serialize(d)
-        d[f"id_{entity}"] = d.get(f"id_{entity}") or f"{entity[:3].upper()}-{i:04d}"
-        d["cabang_nama"] = cabang_map.get(d.get("cabang_id", ""), "-")
+        d[f"id_{entity}"] = d.get(f"id_{entity}") or d.get("id") or f"{entity[:3].upper()}-{i:04d}"
+        
+        raw_c = str(d.get("cabang_id") or d.get("cabang") or "")
+        nama_kota = cabang_map.get(raw_c, d.get("cabang_nama") or d.get("cabang") or "-")
+        
+        d["cabang_nama"] = nama_kota
+        d["cabang"] = nama_kota
+        d["id_cabang"] = nama_kota
+        
         rows.append(d)
+        
     return rows
 
 @api_router.get("/export/{entity}")
-async def export_data(entity: str, format: str = Query("xlsx"),
-                      cabang_id: Optional[str] = None, gender: Optional[str] = None,
+async def export_data(entity: str, 
+                      format: str = Query("xlsx"),
+                      cabang: Optional[str] = Query(None),
+                      cabang_id: Optional[str] = Query(None),
+                      gender: Optional[str] = Query(None),
+                      columns: Optional[str] = Query(None),
                       user: dict = Depends(get_current_user)):
-    if entity not in COLUMN_MAP:
+    
+    if entity not in DEFAULT_COLUMNS:
         raise HTTPException(status_code=400, detail="Entitas tidak valid")
+    
     filters = {}
-    if cabang_id:
-        filters["cabang_id"] = cabang_id
+    valid_cabang = cabang or cabang_id
+    if valid_cabang:
+        c_str = str(valid_cabang).strip()
+        if c_str.lower() not in ["all", "", "null", "undefined", "none"]:
+            or_conds = [
+                {"cabang_id": c_str},
+                {"cabang": c_str}
+            ]
+            if ObjectId.is_valid(c_str):
+                or_conds.append({"cabang_id": ObjectId(c_str)})
+                or_conds.append({"_id": ObjectId(c_str)})
+            filters["$or"] = or_conds
+
     if gender:
-        filters["gender"] = gender
+        g_str = str(gender).strip()
+        if g_str.lower() not in ["all", "", "null", "undefined", "none"]:
+            filters["gender"] = {"$regex": f"^{g_str}$", "$options": "i"}
+
     rows = await build_rows(entity, filters)
-    cols = COLUMN_MAP[entity]
+
+    if columns and columns.strip():
+        req_keys = [c.strip() for c in columns.split(",") if c.strip()]
+        active_keys = req_keys if req_keys else DEFAULT_COLUMNS[entity]
+    else:
+        active_keys = DEFAULT_COLUMNS[entity]
+
+    headers = [COLUMN_TITLE_MAP.get(k, k.replace("_", " ").title()) for k in active_keys]
+
     await log_action(user, "EXPORT", entity, f"Export {format} ({len(rows)} baris)")
 
     if format == "xlsx":
-        df = pd.DataFrame([{label: (", ".join(r[key]) if isinstance(r.get(key), list) else r.get(key, ""))
-                            for key, label in cols} for r in rows])
+        df_data = []
+        for r in rows:
+            row_dict = {}
+            for k, header in zip(active_keys, headers):
+                val = r.get(k)
+                if val is None or val == "":
+                    if k in ("nik", "no_ktp"):
+                        val = r.get("nik") or r.get("no_ktp") or ""
+                    elif k in ("nama_ortu", "nama_orang_tua"):
+                        val = r.get("nama_ortu") or r.get("nama_orang_tua") or ""
+                    elif k in ("cabang", "cabang_nama", "id_cabang"):
+                        val = r.get("cabang_nama") or r.get("cabang") or r.get("cabang_id") or ""
+                    elif k in ("id", f"id_{entity}"):
+                        val = r.get(f"id_{entity}") or r.get("id") or ""
+
+                if isinstance(val, list):
+                    val = ", ".join(map(str, val))
+                row_dict[header] = str(val) if val is not None else ""
+            df_data.append(row_dict)
+
+        df = pd.DataFrame(df_data, columns=headers)
+        
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
             df.to_excel(w, index=False, sheet_name=entity.capitalize())
         buf.seek(0)
-        return StreamingResponse(buf,
+        
+        return StreamingResponse(
+            buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={entity}.xlsx"})
+            headers={"Content-Disposition": f"attachment; filename={entity}.xlsx"}
+        )
 
-    # PDF
     settings = await db.settings.find_one({"key": "yayasan"}) or {}
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("t", parent=styles["Title"], textColor=colors.HexColor("#0F766E"), fontSize=16)
     sub_style = ParagraphStyle("s", parent=styles["Normal"], textColor=colors.HexColor("#C5A059"), fontSize=10, alignment=1)
-    elems = [Paragraph(settings.get("nama", "Yayasan Raudhatul Jannah Nurul Islam wa Iman"), title_style),
-             Paragraph("Majelis Dzikir dan Sholawat Raudhatul Jannah Nurul Islam wa Iman", sub_style),
-             Spacer(1, 6*mm),
-             Paragraph(f"Laporan Data {entity.capitalize()}", ParagraphStyle("h", parent=styles["Heading2"])),
-             Spacer(1, 4*mm)]
-    header = [label for _, label in cols]
-    table_data = [header]
+    
+    elems = [
+        Paragraph(settings.get("nama", "Yayasan Raudhatul Jannah"), title_style),
+        Paragraph("Majelis Dzikir dan Sholawat Raudhatul Jannah", sub_style),
+        Spacer(1, 6*mm),
+        Paragraph(f"Laporan Data {entity.capitalize()}", ParagraphStyle("h", parent=styles["Heading2"])),
+        Spacer(1, 4*mm)
+    ]
+    
+    table_data = [headers]
     for r in rows:
-        table_data.append([", ".join(r[key]) if isinstance(r.get(key), list) else str(r.get(key, "") or "")
-                           for key, _ in cols])
+        row_vals = []
+        for k in active_keys:
+            val = r.get(k)
+            if val is None or val == "":
+                if k in ("nik", "no_ktp"):
+                    val = r.get("nik") or r.get("no_ktp") or ""
+                elif k in ("nama_ortu", "nama_orang_tua"):
+                    val = r.get("nama_ortu") or r.get("nama_orang_tua") or ""
+                elif k in ("cabang", "cabang_nama", "id_cabang"):
+                    val = r.get("cabang_nama") or r.get("cabang") or ""
+                elif k in ("id", f"id_{entity}"):
+                    val = r.get(f"id_{entity}") or r.get("id") or ""
+
+            if isinstance(val, list):
+                val = ", ".join(map(str, val))
+            row_vals.append(str(val if val is not None else ""))
+        table_data.append(row_vals)
+
     t = Table(table_data, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F766E")),
@@ -560,8 +756,10 @@ async def export_data(entity: str, format: str = Query("xlsx"),
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={entity}.pdf"})
 
-# ------------------------------------------------------------------ startup
+# ------------------------------------------------------------------ startup & static mounts
 app.include_router(api_router)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 app.add_middleware(CORSMiddleware, allow_credentials=False,
                    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 

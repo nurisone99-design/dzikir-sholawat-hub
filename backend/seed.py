@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+load_dotenv()
+import certifi
+
 """Seed sample data for Yayasan Raudhatul Jannah portal (idempotent)."""
 
 CABANG = [
@@ -74,13 +78,13 @@ SETTINGS = {
     "key": "yayasan",
     "nama": "Yayasan Raudhatul Jannah Nurul Islam wa Iman",
     "nama_majelis": "Majelis Dzikir dan Sholawat Raudhatul Jannah Nurul Islam wa Iman",
-    "alamat": "Jl. Kebon Sirih No. 12, Menteng, Jakarta Pusat",
+    "alamat": "Jl. Corong RT.16 Perumahan Tubub Kel. Sanga Sanga Kec. Sanga Sanga Kab. Kutai Kartanegara - Kalimantan Timur",
     "email": "info@raudhatuljannah.id",
-    "telepon": "628123456700",
-    "whatsapp": "628123456700",
+    "telepon": "6282310668909",
+    "whatsapp": "6282310668909",
     "instagram": "https://instagram.com/raudhatuljannah",
     "facebook": "https://facebook.com/raudhatuljannah",
-    "youtube": "https://youtube.com/@raudhatuljannah",
+    "youtube": "https://www.youtube.com/@majelisabahjumeri9114",
     "wa_api_key": "",
     "notif_email": True,
 }
@@ -152,6 +156,8 @@ async def seed_all(db, hash_password, now_iso):
 
 async def _seed_test_users(db, hash_password, now_iso):
     users = [
+        {"username": "admin", "email": "admin@raudhatuljannah.id", "password": "Admin@2026",
+         "role": "super_admin", "name": "Super admin"},
         {"username": "admincabang", "email": "cabang@raudhatuljannah.id", "password": "Cabang@2026",
          "role": "admin_cabang", "name": "Admin Cabang Jakarta"},
         {"username": "viewer", "email": "viewer@raudhatuljannah.id", "password": "Viewer@2026",
@@ -163,3 +169,38 @@ async def _seed_test_users(db, hash_password, now_iso):
                 "username": u["username"], "email": u["email"],
                 "password_hash": hash_password(u["password"]), "name": u["name"],
                 "role": u["role"], "status": "active", "created_at": now_iso()})
+
+# ==========================================
+# BLOK EKSEKUSI UTAMA (Jalankan via Terminal)
+# ==========================================
+import asyncio
+import os
+import bcrypt
+from datetime import datetime, timezone
+from motor.motor_asyncio import AsyncIOMotorClient
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+async def main():
+    # Load variabel dari file .env
+    load_dotenv()
+    
+    mongo_url = os.environ.get('MONGO_URL')
+    db_name = os.environ.get('DB_NAME', 'dzikir_db')
+    
+    if not mongo_url:
+        print(" Error: MONGO_URL tidak ditemukan di file .env!")
+        return
+
+    # Inisialisasi koneksi dengan SSL fix
+    client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+    db = client[db_name]
+    
+    print(f" Connecting to database: {db_name}...")
+    await seed_all(db, hash_password, now_iso)
+    print(" Seeding completed successfully!")
+    client.close()
