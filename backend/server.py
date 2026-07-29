@@ -2,11 +2,22 @@ from dotenv import load_dotenv
 from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+import os
 
 def require_env(name: str) -> str:
     value = os.getenv(name)
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+def require_min_length(name: str, min_length: int) -> str:
+    value = require_env(name)
+
+    if len(value) < min_length:
+        raise RuntimeError(
+            f"{name} must be at least {min_length} characters long."
+        )
+
     return value
 
 import os
@@ -26,6 +37,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict, EmailStr
 from bson import ObjectId
@@ -35,11 +48,35 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+        response.headers["Content-Security-Policy"] = (
+    "default-src 'self'; "
+    "img-src 'self' data: https:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "font-src 'self' data:; "
+    "connect-src 'self' http://localhost:8000;"
+)
+        
+        return response
 
 # ------------------------------------------------------------------ config
 mongo_url = require_env("MONGO_URL")
 db_name = require_env("DB_NAME")
-JWT_SECRET = require_env("JWT_SECRET")
+JWT_SECRET = require_min_length("JWT_SECRET", 32)
 
 client = AsyncIOMotorClient(
     mongo_url,
@@ -50,8 +87,8 @@ db = client[db_name]
 
 JWT_ALGORITHM = "HS256"
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_EMAIL = require_env("ADMIN_EMAIL")
+ADMIN_PASSWORD = require_env("ADMIN_PASSWORD")
 
 # Allowed CORS Origins
 ALLOWED_ORIGINS = [
@@ -61,6 +98,15 @@ ALLOWED_ORIGINS = [
         "http://localhost:3000"
     ).split(",")
     if origin.strip()
+]
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "ALLOWED_HOSTS",
+        "localhost,127.0.0.1"
+    ).split(",")
+    if host.strip()
 ]
 
 # Direktori Penyimpanan Upload Gambar
@@ -73,6 +119,12 @@ logger = logging.getLogger(__name__)
 logger.info("Allowed Origins: %s", ALLOWED_ORIGINS)
 
 app = FastAPI(title="Yayasan Raudhatul Jannah API")
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(
+    RateLimitExceeded,
+    _rate_limit_exceeded_handler,
+)
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
 
@@ -214,7 +266,8 @@ class PasswordChange(BaseModel):
 
 # ------------------------------------------------------------------ auth routes
 @api_router.post("/auth/login")
-async def login(data: LoginInput):
+@limiter.limit("5/minute")
+async def login(request: Request, data: LoginInput):
     email = data.email.strip().lower()
     user = await db.users.find_one({"$or": [{"email": email}, {"username": data.email.strip()}]})
     if not user or not verify_password(data.password, user["password_hash"]):
@@ -789,9 +842,25 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
+    allow_methods=[
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+],
     allow_headers=["*"],
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=ALLOWED_HOSTS,
+)
+
+app.add_middleware(SlowAPIMiddleware)
 
 @app.on_event("startup")
 async def startup():
