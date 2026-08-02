@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { toast } from "sonner";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, X, FileText, Image as ImageIcon } from "lucide-react";
 
@@ -11,19 +12,39 @@ export default function FileUpload({
 }) {
   const ref = useRef();
 
-  const handle = (e) => {
+  const handle = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     if (file.size > 4 * 1024 * 1024) {
       toast.error("Ukuran file maksimal 4MB");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => onChange(reader.result);
-    reader.readAsDataURL(file);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await api.post("/upload/guru", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      onChange(res.data.url);
+
+      toast.success("Foto berhasil diupload");
+    } catch (err) {
+      console.error(err);
+      toast.error("Upload gagal");
+    }
   };
 
-  const isImg = value && value.startsWith("data:image");
+  const isImg =
+    value &&
+    (value.startsWith("data:image") ||
+      value.startsWith("/uploads") ||
+      value.startsWith("http"));
 
   return (
     <div className="flex items-start gap-4">
@@ -34,7 +55,11 @@ export default function FileUpload({
       >
         {isImg ? (
           <img
-            src={value}
+            src={
+              value.startsWith("/")
+                ? `${process.env.REACT_APP_BACKEND_URL}${value}`
+                : value
+            }
             alt="preview"
             className="h-full w-full object-cover"
           />

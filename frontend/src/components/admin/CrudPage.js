@@ -70,6 +70,9 @@ export default function CrudPage({
     setLoading(true);
     try {
       const { data } = await api.get(`/${endpoint}`);
+
+      console.log("DATA GURU =", data);
+
       setRows(data);
     } catch (e) {
       toast.error(apiError(e.response?.data?.detail));

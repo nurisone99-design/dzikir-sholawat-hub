@@ -24,15 +24,20 @@ import os
 import io
 from PIL import Image
 import logging
+import asyncio
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta, date
+from pathlib import Path
 from typing import List, Optional, Any, Dict, Annotated
 import certifi
 from pymongo import MongoClient
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, UploadFile, File
+from fastapi.responses import JSONResponse
+import shutil
+import uuid
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -119,6 +124,13 @@ logger = logging.getLogger(__name__)
 logger.info("Allowed Origins: %s", ALLOWED_ORIGINS)
 
 app = FastAPI(title="Yayasan Raudhatul Jannah API")
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=UPLOAD_DIR),
+    name="uploads",
+)
+
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(
@@ -310,6 +322,14 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
         raise HTTPException(status_code=400, detail="File yang diunggah harus berupa gambar")
         
     contents = await file.read()
+
+    MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    if len(contents) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="Ukuran file maksimal 10 MB."
+    )
     
     try:
         # Kompresi & Ubah format ke WEBP (Max 50KB)
@@ -433,24 +453,88 @@ for _n, _c in [("cabang", "cabang"), ("jamaah", "jamaah"),
 
 # ------------------------------------------------------------------ guru
 async def _enrich_guru(docs):
-    cabang_map = {str(c["_id"]): c.get("kota", "") for c in await db.cabang.find().to_list(1000)}
+    # Ambil semua cabang sekali
+    cabang_docs = await db.cabang.find(
+        {},
+        {"kota": 1}
+    ).to_list(1000)
+
+    cabang_map = {
+        str(c["_id"]): c.get("kota", "")
+        for c in cabang_docs
+    }
+
+    # Hitung jumlah jamaah per cabang SEKALI SAJA
+    pipeline = [
+        {
+            "$group": {
+                "_id": "$cabang_id",
+                "total": {"$sum": 1}
+            }
+        }
+    ]
+
+    jamaah_counts = await db.jamaah.aggregate(pipeline).to_list(10000)
+
+    jamaah_map = {
+        str(item["_id"]): item["total"]
+        for item in jamaah_counts
+    }
+
     out = []
-    for d in docs:
-        d = serialize(d)
-        cids = d.get("cabang_ids") or ([d["cabang_id"]] if d.get("cabang_id") else [])
+
+    for doc in docs:
+        d = serialize(doc)
+
+        # Mendukung data lama maupun baru
+        cids = d.get("cabang_ids") or (
+            [d["cabang_id"]] if d.get("cabang_id") else []
+        )
+
         d["cabang_ids"] = cids
-        d["cabang_nama"] = ", ".join([cabang_map[c] for c in cids if cabang_map.get(c)]) or "-"
-        total = 0
-        for cid in cids:
-            total += await db.jamaah.count_documents({"cabang_id": cid})
-        d["jumlah_jamaah"] = total
+
+        d["cabang_nama"] = ", ".join(
+            cabang_map.get(cid, "")
+            for cid in cids
+            if cabang_map.get(cid)
+        )
+
+        d["jumlah_jamaah"] = sum(
+            jamaah_map.get(cid, 0)
+            for cid in cids
+        )
+
         out.append(d)
+
     return out
+
+import time
 
 @api_router.get("/guru")
 async def list_guru(user: dict = Depends(get_current_user)):
-    docs = await db.guru.find().sort("created_at", -1).to_list(5000)
-    return await _enrich_guru(docs)
+    t0 = time.perf_counter()
+
+    cursor = db.guru.find({})
+
+    print("cursor :", time.perf_counter() - t0)
+
+    t1 = time.perf_counter()
+
+    docs = await cursor.sort("created_at", -1).to_list(5000)
+
+    print("tolist :", time.perf_counter() - t1)
+
+    print("total :", time.perf_counter() - t0)
+
+    t2 = time.perf_counter()
+
+    result = await _enrich_guru(docs)
+
+    print("enrich :", time.perf_counter() - t2)
+
+    print("ALL :", time.perf_counter() - t0)
+
+    return result
 
 @api_router.get("/guru/{item_id}")
 async def get_guru(item_id: str, user: dict = Depends(get_current_user)):
@@ -835,6 +919,34 @@ async def export_data(entity: str,
         headers={"Content-Disposition": f"attachment; filename={entity}.pdf"})
 
 # ------------------------------------------------------------------ startup & static mounts
+@api_router.post("/upload/{folder}")
+async def upload_file(
+    folder: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    allowed = {"guru", "jamaah", "pengurus", "galeri", "sk"}
+
+    if folder not in allowed:
+        raise HTTPException(status_code=400, detail="Folder tidak valid")
+
+    image_bytes = await file.read()
+    image_bytes = compress_and_convert_to_webp(image_bytes)
+
+    filename = f"{uuid.uuid4().hex}.webp"
+
+    save_dir = UPLOAD_DIR / folder
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    save_path = save_dir / filename
+
+    with open(save_path, "wb") as f:
+        f.write(image_bytes)
+
+    return {
+        "url": f"/uploads/{folder}/{filename}"
+    }
+
 app.include_router(api_router)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -864,20 +976,79 @@ app.add_middleware(SlowAPIMiddleware)
 
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
+    logger.info("Menghubungkan ke MongoDB...")
+
+    max_retry = 10
+
+    for attempt in range(1, max_retry + 1):
+        try:
+            await db.users.create_index("email", unique=True)
+
+            # Guru
+            await db.guru.create_index("id_guru", unique=True)
+            await db.guru.create_index("cabang_ids")
+
+            # Jamaah
+            await db.jamaah.create_index("id_jamaah", unique=True)
+            await db.jamaah.create_index("cabang_id")
+            await db.jamaah.create_index("guru_id")
+
+            # Cabang
+            await db.cabang.create_index("kota")
+
+            logger.info(
+                f"Berhasil terhubung ke MongoDB (percobaan {attempt})"
+            )
+            break
+
+        except Exception as e:
+            logger.warning(
+                f"Gagal koneksi MongoDB ({attempt}/{max_retry}): {e}"
+            )
+
+            if attempt == max_retry:
+                logger.error("Tidak dapat terhubung ke MongoDB.")
+                raise
+
+            await asyncio.sleep(3)
+
     existing = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
+
     if not existing:
         await db.users.insert_one({
-            "username": "superadmin", "email": ADMIN_EMAIL.lower(),
-            "password_hash": hash_password(ADMIN_PASSWORD), "name": "Super Administrator",
-            "role": "super_admin", "status": "active", "created_at": now_iso()})
+            "username": "superadmin",
+            "email": ADMIN_EMAIL.lower(),
+            "password_hash": hash_password(ADMIN_PASSWORD),
+            "name": "Super Administrator",
+            "role": "super_admin",
+            "status": "active",
+            "created_at": now_iso(),
+        })
         logger.info("Seeded super admin")
+
     elif not verify_password(ADMIN_PASSWORD, existing["password_hash"]):
-        await db.users.update_one({"email": ADMIN_EMAIL.lower()},
-                                  {"$set": {"password_hash": hash_password(ADMIN_PASSWORD)}})
+        await db.users.update_one(
+            {"email": ADMIN_EMAIL.lower()},
+            {
+                "$set": {
+                    "password_hash": hash_password(ADMIN_PASSWORD)
+                }
+            }
+        )
+
     from seed import seed_all
     await seed_all(db, hash_password, now_iso)
 
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+    )
