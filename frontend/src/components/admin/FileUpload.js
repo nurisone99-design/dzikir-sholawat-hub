@@ -1,8 +1,10 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Upload, X, FileText, Image as ImageIcon } from "lucide-react";
+
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000/api";
 
 export default function FileUpload({
   value,
@@ -11,21 +13,24 @@ export default function FileUpload({
   testid,
 }) {
   const ref = useRef();
+  const [uploading, setUploading] = useState(false);
 
   const handle = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 4 * 1024 * 1024) {
-      toast.error("Ukuran file maksimal 4MB");
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Ukuran file maksimal 10MB");
       return;
     }
 
     try {
+      setUploading(true);
+
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await api.post("/upload/guru", formData, {
+      const res = await api.post("/upload", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -37,6 +42,8 @@ export default function FileUpload({
     } catch (err) {
       console.error(err);
       toast.error("Upload gagal");
+    } finally {
+      setUploading(false);
     }
   };
 
