@@ -4,8 +4,14 @@ Covers: auth, RBAC, CRUD, dashboard, exports, backup, public endpoints.
 """
 import os
 import io
+import asyncio
+import sys
+from pathlib import Path
 import pytest
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from seed import demo_seed_enabled, seed_all
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://dzikir-sholawat-hub.preview.emergentagent.com').rstrip('/')
 API = f"{BASE_URL}/api"
@@ -38,6 +44,19 @@ def cabang_token():
 
 
 def H(t): return {"Authorization": f"Bearer {t}"}
+
+
+# ---------- Seed configuration ----------
+class NoDatabaseAccess:
+    def __getattr__(self, name):
+        raise AssertionError(f"Demo seed accessed database while disabled: {name}")
+
+
+def test_demo_seed_is_disabled_by_default_and_does_not_create_demo_accounts(monkeypatch):
+    monkeypatch.delenv("SEED_DEMO_DATA", raising=False)
+
+    assert demo_seed_enabled() is False
+    assert asyncio.run(seed_all(NoDatabaseAccess(), lambda _: "hash", lambda: "now")) is False
 
 
 # ---------- Public ----------

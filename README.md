@@ -190,6 +190,10 @@ ALLOWED_ORIGINS=http://localhost:3000
 
 # Opsional: host HTTP yang diizinkan, pisahkan dengan koma
 ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Opsional: isi true hanya untuk membuat data demo dan akun test pada development
+# Default: false. Jangan aktifkan pada production.
+SEED_DEMO_DATA=false
 ```
 
 | Variabel | Wajib | Fungsi |
@@ -201,6 +205,7 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 | `ADMIN_PASSWORD` | Ya | Password super admin bootstrap. |
 | `ALLOWED_ORIGINS` | Tidak | Daftar origin CORS; default `http://localhost:3000`. |
 | `ALLOWED_HOSTS` | Tidak | Daftar host untuk Trusted Host middleware; default `localhost,127.0.0.1`. |
+| `SEED_DEMO_DATA` | Tidak | Aktifkan hanya dengan nilai `true` untuk menjalankan seed data demo dan akun test. Default `false`; production tidak menjalankan seed otomatis. |
 
 ### Frontend: `frontend/.env`
 

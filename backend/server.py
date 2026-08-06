@@ -1032,18 +1032,12 @@ async def startup():
         })
         logger.info("Seeded super admin")
 
-    elif not verify_password(ADMIN_PASSWORD, existing["password_hash"]):
-        await db.users.update_one(
-            {"email": ADMIN_EMAIL.lower()},
-            {
-                "$set": {
-                    "password_hash": hash_password(ADMIN_PASSWORD)
-                }
-            }
-        )
-
-    from seed import seed_all
-    await seed_all(db, hash_password, now_iso)
+    from seed import demo_seed_enabled, seed_all
+    if demo_seed_enabled():
+        await seed_all(db, hash_password, now_iso)
+        logger.info("Demo seed enabled and applied")
+    else:
+        logger.info("Demo seed disabled")
 
 @app.on_event("shutdown")
 async def shutdown():

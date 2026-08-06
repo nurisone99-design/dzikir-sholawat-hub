@@ -90,13 +90,20 @@ SETTINGS = {
 }
 
 
+def demo_seed_enabled() -> bool:
+    return os.getenv("SEED_DEMO_DATA", "false").strip().lower() == "true"
+
+
 async def seed_all(db, hash_password, now_iso):
+    if not demo_seed_enabled():
+        return False
+
     if await db.cabang.count_documents({}) > 0:
         # ensure settings + test users exist even on reseed
         if not await db.settings.find_one({"key": "yayasan"}):
             await db.settings.insert_one({**SETTINGS, "created_at": now_iso()})
         await _seed_test_users(db, hash_password, now_iso)
-        return
+        return True
 
     # Cabang
     cabang_ids = []
@@ -152,6 +159,7 @@ async def seed_all(db, hash_password, now_iso):
     await db.settings.insert_one({**SETTINGS, "created_at": now_iso()})
 
     await _seed_test_users(db, hash_password, now_iso)
+    return True
 
 
 async def _seed_test_users(db, hash_password, now_iso):
