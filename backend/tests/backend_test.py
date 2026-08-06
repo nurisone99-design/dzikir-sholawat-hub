@@ -71,6 +71,16 @@ class TestPublic:
     def test_settings(self):
         r = requests.get(f"{API}/public/settings", timeout=15)
         assert r.status_code == 200
+        data = r.json()
+        sensitive_fields = {
+            "wa_api_key",
+            "password",
+            "password_hash",
+            "secret",
+            "api_key",
+            "token",
+        }
+        assert sensitive_fields.isdisjoint(data)
 
     def test_contact_submit(self):
         r = requests.post(f"{API}/public/contact",

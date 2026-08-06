@@ -556,6 +556,18 @@ async def bulk_delete_guru(payload: Dict[str, Any], user: dict = Depends(get_cur
     return {"message": f"{len(ids)} data dihapus"}
 
 # ------------------------------------------------------------------ public endpoints
+PUBLIC_SETTINGS_FIELDS = (
+    "nama",
+    "nama_majelis",
+    "alamat",
+    "email",
+    "telepon",
+    "whatsapp",
+    "instagram",
+    "facebook",
+    "youtube",
+)
+
 @api_router.get("/public/stats")
 async def public_stats():
     return {
@@ -588,7 +600,14 @@ async def public_galeri():
 @api_router.get("/public/settings")
 async def public_settings():
     doc = await db.settings.find_one({"key": "yayasan"})
-    return serialize(doc) if doc else {}
+    if not doc:
+        return {}
+
+    return {
+        field: doc[field]
+        for field in PUBLIC_SETTINGS_FIELDS
+        if field in doc
+    }
 
 class ContactInput(BaseModel):
     nama: str
