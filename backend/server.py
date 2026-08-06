@@ -57,6 +57,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from access_control import get_data_scope, require_branch_assignment
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -422,10 +423,111 @@ def make_crud(name: str, collection: str):
         await log_action(user, "DELETE", collection, f"Bulk hapus {len(ids)} data")
         return {"message": f"{len(ids)} data dihapus"}
 
-for _n, _c in [("cabang", "cabang"), ("jamaah", "jamaah"),
+for _n, _c in [("cabang", "cabang"),
                ("pengurus", "pengurus"), ("agenda", "agenda"), ("galeri", "galeri"),
                ("pengumuman", "pengumuman")]:
     make_crud(_n, _c)
+
+# ------------------------------------------------------------------ jamaah CRUD with branch scope
+def jamaah_data_scope(user: dict) -> Optional[Dict[str, str]]:
+    require_branch_assignment(user)
+    return get_data_scope(user)
+
+
+def jamaah_query(scope: Optional[Dict[str, str]], query: Optional[dict] = None) -> dict:
+    scoped_query = dict(query or {})
+    if scope is not None:
+        scoped_query.update(scope)
+    return scoped_query
+
+
+@api_router.get("/jamaah")
+async def list_jamaah(user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    docs = await db.jamaah.find(jamaah_query(scope)).sort("created_at", -1).to_list(5000)
+    return [serialize(d) for d in docs]
+
+
+@api_router.get("/jamaah/{item_id}")
+async def get_jamaah(item_id: str, user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    doc = await db.jamaah.find_one(jamaah_query(scope, {"_id": ObjectId(item_id)}))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    return serialize(doc)
+
+
+@api_router.post("/jamaah")
+async def create_jamaah(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    require_write(user)
+    payload.pop("id", None)
+    if scope is not None:
+        payload["cabang_id"] = scope["cabang_id"]
+    payload["created_at"] = now_iso()
+    payload["updated_at"] = now_iso()
+
+    last = await db.jamaah.find_one(
+        {"id_jamaah": {"$exists": True}},
+        sort=[("id_jamaah", -1)],
+    )
+    if last and last.get("id_jamaah"):
+        nomor = int(last["id_jamaah"].split("-")[1]) + 1
+    else:
+        nomor = 1
+    payload["id_jamaah"] = f"JMH-{nomor:04d}"
+
+    res = await db.jamaah.insert_one(payload)
+    await log_action(user, "CREATE", "jamaah", payload.get("nama", ""))
+    return serialize(await db.jamaah.find_one({"_id": res.inserted_id}))
+
+
+@api_router.put("/jamaah/{item_id}")
+async def update_jamaah(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    require_write(user)
+    payload.pop("id", None)
+    payload.pop("_id", None)
+    if scope is not None:
+        payload["cabang_id"] = scope["cabang_id"]
+    payload["updated_at"] = now_iso()
+
+    result = await db.jamaah.update_one(
+        jamaah_query(scope, {"_id": ObjectId(item_id)}),
+        {"$set": payload},
+    )
+    if scope is not None and result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await log_action(user, "UPDATE", "jamaah", item_id)
+    return serialize(await db.jamaah.find_one({"_id": ObjectId(item_id)}))
+
+
+@api_router.delete("/jamaah/{item_id}")
+async def delete_jamaah(item_id: str, user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    require_write(user)
+    result = await db.jamaah.delete_one(jamaah_query(scope, {"_id": ObjectId(item_id)}))
+    if scope is not None and result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await log_action(user, "DELETE", "jamaah", item_id)
+    return {"message": "Data dihapus"}
+
+
+@api_router.post("/jamaah/bulk-delete")
+async def bulk_delete_jamaah(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = jamaah_data_scope(user)
+    require_write(user)
+    ids = [ObjectId(i) for i in payload.get("ids", [])]
+    target_query = jamaah_query(scope, {"_id": {"$in": ids}})
+
+    if scope is not None:
+        matched = await db.jamaah.count_documents(target_query)
+        if matched != len(set(ids)):
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+
+    await db.jamaah.delete_many(target_query)
+    await log_action(user, "DELETE", "jamaah", f"Bulk hapus {len(ids)} data")
+    return {"message": f"{len(ids)} data dihapus"}
 
 # ------------------------------------------------------------------ guru
 async def _enrich_guru(docs):

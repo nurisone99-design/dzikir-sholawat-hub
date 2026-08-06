@@ -6,11 +6,14 @@ import os
 import io
 import asyncio
 import sys
+import uuid
 from pathlib import Path
+from fastapi import HTTPException
 import pytest
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from access_control import get_data_scope, require_branch_assignment
 from seed import demo_seed_enabled, seed_all
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://dzikir-sholawat-hub.preview.emergentagent.com').rstrip('/')
@@ -57,6 +60,31 @@ def test_demo_seed_is_disabled_by_default_and_does_not_create_demo_accounts(monk
 
     assert demo_seed_enabled() is False
     assert asyncio.run(seed_all(NoDatabaseAccess(), lambda _: "hash", lambda: "now")) is False
+
+
+# ---------- Branch scope helpers ----------
+class TestBranchScopeHelpers:
+    def test_super_admin_has_unrestricted_scope(self):
+        assert get_data_scope({"role": "super_admin"}) is None
+
+    @pytest.mark.parametrize("role", ["admin_cabang", "viewer"])
+    def test_branch_scoped_roles_receive_their_branch_filter(self, role):
+        assert get_data_scope({"role": role, "cabang_id": "cabang-1"}) == {
+            "cabang_id": "cabang-1"
+        }
+
+    @pytest.mark.parametrize("role", ["admin_cabang", "viewer"])
+    def test_branch_scoped_roles_require_an_assignment(self, role):
+        with pytest.raises(HTTPException) as exc:
+            require_branch_assignment({"role": role})
+
+        assert exc.value.status_code == 403
+
+    def test_unknown_role_is_denied_a_data_scope(self):
+        with pytest.raises(HTTPException) as exc:
+            get_data_scope({"role": "unknown", "cabang_id": "cabang-1"})
+
+        assert exc.value.status_code == 403
 
 
 # ---------- Public ----------
@@ -213,6 +241,182 @@ class TestJamaahCRUD:
         assert d["ijazah"] == ["Kitab", "Amaliah"]
         # cleanup
         requests.delete(f"{API}/jamaah/{d['id']}", headers=H(super_token), timeout=15)
+
+
+# ---------- Jamaah branch scope ----------
+class TestJamaahBranchScope:
+    @classmethod
+    def setup_class(cls):
+        cls.super_token = requests.post(f"{API}/auth/login", json=SUPER, timeout=15).json()["token"]
+        cls.tag = uuid.uuid4().hex[:10]
+        cls.member_ids = []
+
+        cls.branch_a = cls._create_branch("A")
+        cls.branch_b = cls._create_branch("B")
+        cls.admin_token = cls._create_scoped_user("admin_cabang", cls.branch_a, "admin")
+        cls.viewer_token = cls._create_scoped_user("viewer", cls.branch_a, "viewer")
+        cls.member_a = cls._create_member(cls.branch_a, "A")
+        cls.member_b = cls._create_member(cls.branch_b, "B")
+
+    @classmethod
+    def teardown_class(cls):
+        for member_id in cls.member_ids:
+            requests.delete(f"{API}/jamaah/{member_id}", headers=H(cls.super_token), timeout=15)
+        for user_id in getattr(cls, "user_ids", []):
+            requests.delete(f"{API}/users/{user_id}", headers=H(cls.super_token), timeout=15)
+        for branch_id in (getattr(cls, "branch_a", None), getattr(cls, "branch_b", None)):
+            if branch_id:
+                requests.delete(f"{API}/cabang/{branch_id}", headers=H(cls.super_token), timeout=15)
+
+    @classmethod
+    def _create_branch(cls, suffix):
+        response = requests.post(
+            f"{API}/cabang",
+            json={
+                "id_cabang": f"SCOPE-{cls.tag}-{suffix}",
+                "kota": f"TEST_SCOPE_{cls.tag}_{suffix}",
+                "alamat": "Jl. Scope Test",
+                "ketua": "Scope Tester",
+                "no_hp": "0800000000",
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    @classmethod
+    def _create_scoped_user(cls, role, cabang_id, label):
+        response = requests.post(
+            f"{API}/users",
+            json={
+                "username": f"scope_{label}_{cls.tag}",
+                "email": f"scope_{label}_{cls.tag}@example.test",
+                "password": "ScopePass@2026",
+                "role": role,
+                "status": "active",
+                "cabang_id": cabang_id,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        cls.user_ids = getattr(cls, "user_ids", []) + [response.json()["id"]]
+        login = requests.post(
+            f"{API}/auth/login",
+            json={"email": f"scope_{label}_{cls.tag}@example.test", "password": "ScopePass@2026"},
+            timeout=15,
+        )
+        assert login.status_code == 200, login.text
+        return login.json()["token"]
+
+    @classmethod
+    def _create_member(cls, cabang_id, suffix):
+        response = requests.post(
+            f"{API}/jamaah",
+            json={
+                "nama": f"TEST_SCOPE_MEMBER_{cls.tag}_{suffix}",
+                "nik": f"SCOPE-{cls.tag}-{suffix}",
+                "gender": "Laki-laki",
+                "cabang_id": cabang_id,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        member_id = response.json()["id"]
+        cls.member_ids.append(member_id)
+        return member_id
+
+    def test_list_returns_only_assigned_branch_members(self):
+        response = requests.get(f"{API}/jamaah", headers=H(self.admin_token), timeout=15)
+        assert response.status_code == 200, response.text
+        ids = {row["id"] for row in response.json()}
+        assert self.member_a in ids
+        assert self.member_b not in ids
+
+    def test_detail_denies_other_branch_member(self):
+        own = requests.get(f"{API}/jamaah/{self.member_a}", headers=H(self.admin_token), timeout=15)
+        other = requests.get(f"{API}/jamaah/{self.member_b}", headers=H(self.admin_token), timeout=15)
+        assert own.status_code == 200, own.text
+        assert other.status_code == 404, other.text
+
+    def test_create_forces_the_assigned_branch(self):
+        response = requests.post(
+            f"{API}/jamaah",
+            json={
+                "nama": f"TEST_SCOPE_FORCED_{self.tag}",
+                "nik": f"FORCED-{self.tag}",
+                "gender": "Perempuan",
+                "cabang_id": self.branch_b,
+            },
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        self.member_ids.append(data["id"])
+        assert data["cabang_id"] == self.branch_a
+
+    def test_update_keeps_member_in_the_assigned_branch_and_denies_other_branch(self):
+        own = requests.put(
+            f"{API}/jamaah/{self.member_a}",
+            json={"nama": "TEST_SCOPE_UPDATED", "cabang_id": self.branch_b},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        other = requests.put(
+            f"{API}/jamaah/{self.member_b}",
+            json={"nama": "TEST_SCOPE_CROSS_BRANCH"},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        assert own.json()["cabang_id"] == self.branch_a
+        assert other.status_code == 404, other.text
+
+    def test_delete_denies_other_branch_member_and_allows_own_member(self):
+        own_member = self._create_member(self.branch_a, "DELETE")
+        other_member = self._create_member(self.branch_b, "DELETE")
+        other = requests.delete(f"{API}/jamaah/{other_member}", headers=H(self.admin_token), timeout=15)
+        own = requests.delete(f"{API}/jamaah/{own_member}", headers=H(self.admin_token), timeout=15)
+        assert other.status_code == 404, other.text
+        assert own.status_code == 200, own.text
+        self.member_ids.remove(own_member)
+
+    def test_bulk_delete_rejects_cross_branch_ids(self):
+        own_member = self._create_member(self.branch_a, "BULK")
+        other_member = self._create_member(self.branch_b, "BULK")
+        mixed = requests.post(
+            f"{API}/jamaah/bulk-delete",
+            json={"ids": [own_member, other_member]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert mixed.status_code == 404, mixed.text
+
+        own = requests.post(
+            f"{API}/jamaah/bulk-delete",
+            json={"ids": [own_member]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        self.member_ids.remove(own_member)
+
+    def test_viewer_reads_assigned_branch_but_cannot_create(self):
+        listed = requests.get(f"{API}/jamaah", headers=H(self.viewer_token), timeout=15)
+        create = requests.post(
+            f"{API}/jamaah",
+            json={"nama": "TEST_SCOPE_VIEWER", "cabang_id": self.branch_b},
+            headers=H(self.viewer_token),
+            timeout=15,
+        )
+        assert listed.status_code == 200, listed.text
+        ids = {row["id"] for row in listed.json()}
+        assert self.member_a in ids
+        assert self.member_b not in ids
+        assert create.status_code == 403, create.text
 
 
 # ---------- Dashboard ----------
