@@ -13,6 +13,9 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import api from "@/lib/api";
 
+const BACKEND_URL =
+  process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
+
 const KITAB = [
   "Kitab Awwaluddin",
   "Kitab Makam Wilayah",
@@ -282,7 +285,11 @@ export default function DataJamaah() {
                   <div className="w-20 h-28 bg-emerald-900/40 rounded-lg border-2 border-emerald-200/50 overflow-hidden flex-shrink-0 shadow-md flex items-center justify-center">
                     {selectedJamaah.foto ? (
                       <img
-                        src={selectedJamaah.foto}
+                        src={
+                          selectedJamaah.foto?.startsWith("http")
+                            ? selectedJamaah.foto
+                            : `${BACKEND_URL}${selectedJamaah.foto}`
+                        }
                         alt={selectedJamaah.nama}
                         className="w-full h-full object-cover"
                       />

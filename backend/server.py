@@ -127,7 +127,10 @@ app = FastAPI(title="Yayasan Raudhatul Jannah API")
 
 app.mount(
     "/uploads",
-    StaticFiles(directory=UPLOAD_DIR),
+    StaticFiles(
+        directory=UPLOAD_DIR,
+        check_dir=True,
+    ),
     name="uploads",
 )
 
@@ -314,47 +317,7 @@ async def change_password(data: PasswordChange, user: dict = Depends(get_current
     return {"message": "Kata sandi berhasil diubah"}
 
 # ------------------------------------------------------------------ upload router
-@api_router.post("/upload")
-async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    require_write(user)
-    
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File yang diunggah harus berupa gambar")
-        
-    contents = await file.read()
 
-    MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
-
-    if len(contents) > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail="Ukuran file maksimal 10 MB."
-    )
-    
-    try:
-        # Kompresi & Ubah format ke WEBP (Max 50KB)
-        compressed_bytes = compress_and_convert_to_webp(contents, max_size_kb=50)
-        
-        # Buat nama file unik
-        base_name = Path(file.filename).stem
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        new_filename = f"{base_name}_{timestamp}.webp"
-        file_path = UPLOAD_DIR / new_filename
-        
-        # Simpan file
-        with open(file_path, "wb") as f:
-            f.write(compressed_bytes)
-            
-        await log_action(user, "CREATE", "upload", f"Upload gambar: {new_filename}")
-        
-        return {
-            "status": "success",
-            "filename": new_filename,
-            "url": f"/uploads/{new_filename}"
-        }
-    except Exception as e:
-        logger.error(f"Gagal memproses gambar: {str(e)}")
-        raise HTTPException(status_code=500, detail="Terjadi kesalahan saat memproses gambar")
 
 # ------------------------------------------------------------------ user management
 @api_router.get("/users")
@@ -417,6 +380,19 @@ def make_crud(name: str, collection: str):
         payload.pop("id", None)
         payload["created_at"] = now_iso()
         payload["updated_at"] = now_iso()
+        # Generate ID otomatis
+        if collection == "jamaah":
+            last = await db[collection].find_one(
+                {"id_jamaah": {"$exists": True}},
+                sort=[("id_jamaah", -1)]
+            )
+
+            if last and last.get("id_jamaah"):
+                nomor = int(last["id_jamaah"].split("-")[1]) + 1
+            else:
+                nomor = 1
+
+            payload["id_jamaah"] = f"JMH-{nomor:04d}"
         res = await db[collection].insert_one(payload)
         await log_action(user, "CREATE", collection, payload.get("nama") or payload.get("judul") or "")
         return serialize(await db[collection].find_one({"_id": res.inserted_id}))
@@ -930,7 +906,18 @@ async def upload_file(
     if folder not in allowed:
         raise HTTPException(status_code=400, detail="Folder tidak valid")
 
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File harus berupa gambar."
+        )
+
     image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+        status_code=413,
+        detail="Ukuran file maksimal 10 MB."
+    )
     image_bytes = compress_and_convert_to_webp(image_bytes)
 
     filename = f"{uuid.uuid4().hex}.webp"

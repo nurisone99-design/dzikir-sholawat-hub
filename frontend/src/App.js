@@ -61,8 +61,13 @@ function App() {
             <Routes>
               <Route element={<PublicLayout />}>
                 <Route path="/" element={<Home />} />
+
                 <Route path="/profil" element={<Profil />} />
+                <Route path="/profil-yayasan" element={<Profil />} />
+
                 <Route path="/pendiri" element={<Pendiri />} />
+                <Route path="/profil-majelis" element={<Pendiri />} />
+
                 <Route path="/cabang" element={<Cabang />} />
                 <Route path="/galeri" element={<Galeri />} />
                 <Route path="/kontak" element={<Kontak />} />

@@ -521,6 +521,7 @@ export default function CrudPage({
                     <div className="flex-1 w-full min-h-[160px] h-full flex flex-col">
                       <FileUpload
                         value={form[f.key]}
+                        folder={endpoint}
                         accept={f.accept}
                         aspect={f.aspect}
                         onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}

@@ -9,6 +9,7 @@ const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000/api";
 export default function FileUpload({
   value,
   onChange,
+  folder = "guru",
   accept = "image/*",
   testid,
 }) {
@@ -30,7 +31,7 @@ export default function FileUpload({
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await api.post("/upload", formData, {
+      const res = await api.post(`/upload/${folder}`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },

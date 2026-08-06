@@ -163,17 +163,6 @@ export default function Kontak() {
               </a>
             )}
           </div>
-
-          <div className="premium-card overflow-hidden mt-6 h-64">
-            <iframe
-              title="Lokasi Yayasan"
-              width="100%"
-              height="100%"
-              style={{ border: 0 }}
-              loading="lazy"
-              src="https://www.google.com/maps?q=Menteng,Jakarta&output=embed"
-            />
-          </div>
         </motion.div>
 
         <motion.div
