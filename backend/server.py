@@ -530,7 +530,7 @@ async def bulk_delete_jamaah(payload: Dict[str, Any], user: dict = Depends(get_c
     return {"message": f"{len(ids)} data dihapus"}
 
 # ------------------------------------------------------------------ guru
-async def _enrich_guru(docs):
+async def _enrich_guru(docs, scope: Optional[Dict[str, str]] = None):
     # Ambil semua cabang sekali
     cabang_docs = await db.cabang.find(
         {},
@@ -569,6 +569,9 @@ async def _enrich_guru(docs):
             [d["cabang_id"]] if d.get("cabang_id") else []
         )
 
+        if scope is not None:
+            cids = [cid for cid in cids if cid == scope["cabang_id"]]
+
         d["cabang_ids"] = cids
 
         d["cabang_nama"] = ", ".join(
@@ -586,74 +589,92 @@ async def _enrich_guru(docs):
 
     return out
 
-import time
+def guru_data_scope(user: dict) -> Optional[Dict[str, str]]:
+    require_branch_assignment(user)
+    return get_data_scope(user)
+
+
+def guru_query(scope: Optional[Dict[str, str]], query: Optional[dict] = None) -> dict:
+    scoped_query = dict(query or {})
+    if scope is not None:
+        cabang_id = scope["cabang_id"]
+        scoped_query["$or"] = [
+            {"cabang_id": cabang_id},
+            {"cabang_ids": cabang_id},
+        ]
+    return scoped_query
 
 @api_router.get("/guru")
 async def list_guru(user: dict = Depends(get_current_user)):
-    t0 = time.perf_counter()
-
-    cursor = db.guru.find({})
-
-    print("cursor :", time.perf_counter() - t0)
-
-    t1 = time.perf_counter()
-
+    scope = guru_data_scope(user)
+    cursor = db.guru.find(guru_query(scope))
     docs = await cursor.sort("created_at", -1).to_list(5000)
-
-    print("tolist :", time.perf_counter() - t1)
-
-    print("total :", time.perf_counter() - t0)
-
-    t2 = time.perf_counter()
-
-    result = await _enrich_guru(docs)
-
-    print("enrich :", time.perf_counter() - t2)
-
-    print("ALL :", time.perf_counter() - t0)
-
+    result = await _enrich_guru(docs, scope)
     return result
 
 @api_router.get("/guru/{item_id}")
 async def get_guru(item_id: str, user: dict = Depends(get_current_user)):
-    doc = await db.guru.find_one({"_id": ObjectId(item_id)})
+    scope = guru_data_scope(user)
+    doc = await db.guru.find_one(guru_query(scope, {"_id": ObjectId(item_id)}))
     if not doc:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
-    return (await _enrich_guru([doc]))[0]
+    return (await _enrich_guru([doc], scope))[0]
 
 @api_router.post("/guru")
 async def create_guru(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = guru_data_scope(user)
     require_write(user)
     for k in ("id", "cabang_nama", "jumlah_jamaah"):
         payload.pop(k, None)
+    if scope is not None:
+        payload.pop("cabang_id", None)
+        payload["cabang_ids"] = [scope["cabang_id"]]
     payload["created_at"] = now_iso()
     payload["updated_at"] = now_iso()
     res = await db.guru.insert_one(payload)
     await log_action(user, "CREATE", "guru", payload.get("nama", ""))
-    return (await _enrich_guru([await db.guru.find_one({"_id": res.inserted_id})]))[0]
+    return (await _enrich_guru([await db.guru.find_one({"_id": res.inserted_id})], scope))[0]
 
 @api_router.put("/guru/{item_id}")
 async def update_guru(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = guru_data_scope(user)
     require_write(user)
     for k in ("id", "_id", "cabang_nama", "jumlah_jamaah"):
         payload.pop(k, None)
+    target_query = guru_query(scope, {"_id": ObjectId(item_id)})
+    if scope is not None:
+        existing = await db.guru.find_one(target_query)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        payload.pop("cabang_id", None)
+        payload.pop("cabang_ids", None)
     payload["updated_at"] = now_iso()
-    await db.guru.update_one({"_id": ObjectId(item_id)}, {"$set": payload})
+    await db.guru.update_one(target_query, {"$set": payload})
     await log_action(user, "UPDATE", "guru", item_id)
-    return (await _enrich_guru([await db.guru.find_one({"_id": ObjectId(item_id)})]))[0]
+    doc = await db.guru.find_one({"_id": ObjectId(item_id)})
+    return (await _enrich_guru([doc], scope))[0]
 
 @api_router.delete("/guru/{item_id}")
 async def delete_guru(item_id: str, user: dict = Depends(get_current_user)):
+    scope = guru_data_scope(user)
     require_write(user)
-    await db.guru.delete_one({"_id": ObjectId(item_id)})
+    result = await db.guru.delete_one(guru_query(scope, {"_id": ObjectId(item_id)}))
+    if scope is not None and result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
     await log_action(user, "DELETE", "guru", item_id)
     return {"message": "Data dihapus"}
 
 @api_router.post("/guru/bulk-delete")
 async def bulk_delete_guru(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = guru_data_scope(user)
     require_write(user)
     ids = [ObjectId(i) for i in payload.get("ids", [])]
-    await db.guru.delete_many({"_id": {"$in": ids}})
+    target_query = guru_query(scope, {"_id": {"$in": ids}})
+    if scope is not None:
+        matched = await db.guru.count_documents(target_query)
+        if matched != len(set(ids)):
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await db.guru.delete_many(target_query)
     await log_action(user, "DELETE", "guru", f"Bulk hapus {len(ids)} data")
     return {"message": f"{len(ids)} data dihapus"}
 

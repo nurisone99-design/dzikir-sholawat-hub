@@ -419,6 +419,187 @@ class TestJamaahBranchScope:
         assert create.status_code == 403, create.text
 
 
+# ---------- Guru branch scope ----------
+class TestGuruBranchScope:
+    @classmethod
+    def setup_class(cls):
+        cls.super_token = requests.post(f"{API}/auth/login", json=SUPER, timeout=15).json()["token"]
+        cls.tag = uuid.uuid4().hex[:10]
+        cls.guru_ids = []
+        cls.user_ids = []
+
+        cls.branch_a = cls._create_branch("A")
+        cls.branch_b = cls._create_branch("B")
+        cls.admin_token = cls._create_scoped_user("admin_cabang", cls.branch_a, "admin")
+        cls.viewer_token = cls._create_scoped_user("viewer", cls.branch_a, "viewer")
+        cls.guru_a = cls._create_guru([cls.branch_a], "A")
+        cls.guru_b = cls._create_guru([cls.branch_b], "B")
+        cls.guru_shared = cls._create_guru([cls.branch_a, cls.branch_b], "SHARED")
+
+    @classmethod
+    def teardown_class(cls):
+        for guru_id in cls.guru_ids:
+            requests.delete(f"{API}/guru/{guru_id}", headers=H(cls.super_token), timeout=15)
+        for user_id in cls.user_ids:
+            requests.delete(f"{API}/users/{user_id}", headers=H(cls.super_token), timeout=15)
+        for branch_id in (getattr(cls, "branch_a", None), getattr(cls, "branch_b", None)):
+            if branch_id:
+                requests.delete(f"{API}/cabang/{branch_id}", headers=H(cls.super_token), timeout=15)
+
+    @classmethod
+    def _create_branch(cls, suffix):
+        response = requests.post(
+            f"{API}/cabang",
+            json={
+                "id_cabang": f"GURU-SCOPE-{cls.tag}-{suffix}",
+                "kota": f"TEST_GURU_SCOPE_{cls.tag}_{suffix}",
+                "alamat": "Jl. Guru Scope Test",
+                "ketua": "Guru Scope Tester",
+                "no_hp": "0800000000",
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    @classmethod
+    def _create_scoped_user(cls, role, cabang_id, label):
+        email = f"guru_scope_{label}_{cls.tag}@example.test"
+        response = requests.post(
+            f"{API}/users",
+            json={
+                "username": f"guru_scope_{label}_{cls.tag}",
+                "email": email,
+                "password": "GuruScopePass@2026",
+                "role": role,
+                "status": "active",
+                "cabang_id": cabang_id,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        cls.user_ids.append(response.json()["id"])
+        login = requests.post(
+            f"{API}/auth/login",
+            json={"email": email, "password": "GuruScopePass@2026"},
+            timeout=15,
+        )
+        assert login.status_code == 200, login.text
+        return login.json()["token"]
+
+    @classmethod
+    def _create_guru(cls, cabang_ids, suffix):
+        response = requests.post(
+            f"{API}/guru",
+            json={
+                "id_guru": f"GURU-SCOPE-{cls.tag}-{suffix}",
+                "nama": f"TEST_GURU_SCOPE_{cls.tag}_{suffix}",
+                "cabang_ids": cabang_ids,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        guru_id = response.json()["id"]
+        cls.guru_ids.append(guru_id)
+        return guru_id
+
+    def test_list_returns_assigned_and_shared_guru_only(self):
+        response = requests.get(f"{API}/guru", headers=H(self.admin_token), timeout=15)
+        assert response.status_code == 200, response.text
+        rows = {row["id"]: row for row in response.json()}
+        assert self.guru_a in rows
+        assert self.guru_shared in rows
+        assert self.guru_b not in rows
+        assert rows[self.guru_shared]["cabang_ids"] == [self.branch_a]
+
+    def test_detail_denies_other_branch_guru(self):
+        own = requests.get(f"{API}/guru/{self.guru_shared}", headers=H(self.admin_token), timeout=15)
+        other = requests.get(f"{API}/guru/{self.guru_b}", headers=H(self.admin_token), timeout=15)
+        assert own.status_code == 200, own.text
+        assert own.json()["cabang_ids"] == [self.branch_a]
+        assert other.status_code == 404, other.text
+
+    def test_create_forces_the_assigned_branch(self):
+        response = requests.post(
+            f"{API}/guru",
+            json={
+                "id_guru": f"GURU-SCOPE-{self.tag}-FORCED",
+                "nama": "TEST_GURU_FORCED_BRANCH",
+                "cabang_id": self.branch_b,
+                "cabang_ids": [self.branch_b],
+            },
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        self.guru_ids.append(data["id"])
+        assert data["cabang_ids"] == [self.branch_a]
+
+    def test_update_preserves_server_side_branch_membership_and_denies_other_branch(self):
+        own = requests.put(
+            f"{API}/guru/{self.guru_shared}",
+            json={"nama": "TEST_GURU_SHARED_UPDATED", "cabang_ids": [self.branch_b]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        other = requests.put(
+            f"{API}/guru/{self.guru_b}",
+            json={"nama": "TEST_GURU_CROSS_BRANCH"},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        assert own.json()["cabang_ids"] == [self.branch_a]
+        assert other.status_code == 404, other.text
+
+    def test_delete_denies_other_branch_guru_and_allows_own_guru(self):
+        own_guru = self._create_guru([self.branch_a], "DELETE")
+        other_guru = self._create_guru([self.branch_b], "DELETE")
+        other = requests.delete(f"{API}/guru/{other_guru}", headers=H(self.admin_token), timeout=15)
+        own = requests.delete(f"{API}/guru/{own_guru}", headers=H(self.admin_token), timeout=15)
+        assert other.status_code == 404, other.text
+        assert own.status_code == 200, own.text
+        self.guru_ids.remove(own_guru)
+
+    def test_bulk_delete_rejects_cross_branch_ids(self):
+        own_guru = self._create_guru([self.branch_a], "BULK")
+        other_guru = self._create_guru([self.branch_b], "BULK")
+        mixed = requests.post(
+            f"{API}/guru/bulk-delete",
+            json={"ids": [own_guru, other_guru]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert mixed.status_code == 404, mixed.text
+
+        own = requests.post(
+            f"{API}/guru/bulk-delete",
+            json={"ids": [own_guru]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        self.guru_ids.remove(own_guru)
+
+    def test_viewer_reads_assigned_branch_but_cannot_create(self):
+        listed = requests.get(f"{API}/guru", headers=H(self.viewer_token), timeout=15)
+        create = requests.post(
+            f"{API}/guru",
+            json={"nama": "TEST_GURU_VIEWER", "cabang_ids": [self.branch_b]},
+            headers=H(self.viewer_token),
+            timeout=15,
+        )
+        assert listed.status_code == 200, listed.text
+        ids = {row["id"] for row in listed.json()}
+        assert self.guru_a in ids
+        assert self.guru_b not in ids
+        assert create.status_code == 403, create.text
+
+
 # ---------- Dashboard ----------
 class TestDashboard:
     def test_stats(self, super_token):
