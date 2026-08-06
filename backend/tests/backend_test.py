@@ -600,6 +600,185 @@ class TestGuruBranchScope:
         assert create.status_code == 403, create.text
 
 
+# ---------- Pengurus branch scope ----------
+class TestPengurusBranchScope:
+    @classmethod
+    def setup_class(cls):
+        cls.super_token = requests.post(f"{API}/auth/login", json=SUPER, timeout=15).json()["token"]
+        cls.tag = uuid.uuid4().hex[:10]
+        cls.pengurus_ids = []
+        cls.user_ids = []
+
+        cls.branch_a = cls._create_branch("A")
+        cls.branch_b = cls._create_branch("B")
+        cls.admin_token = cls._create_scoped_user("admin_cabang", cls.branch_a, "admin")
+        cls.viewer_token = cls._create_scoped_user("viewer", cls.branch_a, "viewer")
+        cls.pengurus_a = cls._create_pengurus(cls.branch_a, "A")
+        cls.pengurus_b = cls._create_pengurus(cls.branch_b, "B")
+
+    @classmethod
+    def teardown_class(cls):
+        for pengurus_id in cls.pengurus_ids:
+            requests.delete(f"{API}/pengurus/{pengurus_id}", headers=H(cls.super_token), timeout=15)
+        for user_id in cls.user_ids:
+            requests.delete(f"{API}/users/{user_id}", headers=H(cls.super_token), timeout=15)
+        for branch_id in (getattr(cls, "branch_a", None), getattr(cls, "branch_b", None)):
+            if branch_id:
+                requests.delete(f"{API}/cabang/{branch_id}", headers=H(cls.super_token), timeout=15)
+
+    @classmethod
+    def _create_branch(cls, suffix):
+        response = requests.post(
+            f"{API}/cabang",
+            json={
+                "id_cabang": f"PENGURUS-SCOPE-{cls.tag}-{suffix}",
+                "kota": f"TEST_PENGURUS_SCOPE_{cls.tag}_{suffix}",
+                "alamat": "Jl. Pengurus Scope Test",
+                "ketua": "Pengurus Scope Tester",
+                "no_hp": "0800000000",
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    @classmethod
+    def _create_scoped_user(cls, role, cabang_id, label):
+        email = f"pengurus_scope_{label}_{cls.tag}@example.test"
+        response = requests.post(
+            f"{API}/users",
+            json={
+                "username": f"pengurus_scope_{label}_{cls.tag}",
+                "email": email,
+                "password": "PengurusScopePass@2026",
+                "role": role,
+                "status": "active",
+                "cabang_id": cabang_id,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        cls.user_ids.append(response.json()["id"])
+        login = requests.post(
+            f"{API}/auth/login",
+            json={"email": email, "password": "PengurusScopePass@2026"},
+            timeout=15,
+        )
+        assert login.status_code == 200, login.text
+        return login.json()["token"]
+
+    @classmethod
+    def _create_pengurus(cls, cabang_id, suffix):
+        response = requests.post(
+            f"{API}/pengurus",
+            json={
+                "id_pengurus": f"PENGURUS-SCOPE-{cls.tag}-{suffix}",
+                "nama": f"TEST_PENGURUS_SCOPE_{cls.tag}_{suffix}",
+                "jabatan": "Pengurus Test",
+                "cabang_id": cabang_id,
+            },
+            headers=H(cls.super_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        pengurus_id = response.json()["id"]
+        cls.pengurus_ids.append(pengurus_id)
+        return pengurus_id
+
+    def test_super_admin_sees_all_branch_records(self):
+        response = requests.get(f"{API}/pengurus", headers=H(self.super_token), timeout=15)
+        assert response.status_code == 200, response.text
+        ids = {row["id"] for row in response.json()}
+        assert self.pengurus_a in ids
+        assert self.pengurus_b in ids
+
+    def test_admin_cabang_sees_only_its_branch_records(self):
+        response = requests.get(f"{API}/pengurus", headers=H(self.admin_token), timeout=15)
+        assert response.status_code == 200, response.text
+        ids = {row["id"] for row in response.json()}
+        assert self.pengurus_a in ids
+        assert self.pengurus_b not in ids
+
+    def test_viewer_reads_assigned_branch_but_cannot_create(self):
+        listed = requests.get(f"{API}/pengurus", headers=H(self.viewer_token), timeout=15)
+        create = requests.post(
+            f"{API}/pengurus",
+            json={"nama": "TEST_PENGURUS_VIEWER", "cabang_id": self.branch_b},
+            headers=H(self.viewer_token),
+            timeout=15,
+        )
+        assert listed.status_code == 200, listed.text
+        ids = {row["id"] for row in listed.json()}
+        assert self.pengurus_a in ids
+        assert self.pengurus_b not in ids
+        assert create.status_code == 403, create.text
+
+    def test_create_forces_the_assigned_branch(self):
+        response = requests.post(
+            f"{API}/pengurus",
+            json={
+                "id_pengurus": f"PENGURUS-SCOPE-{self.tag}-FORCED",
+                "nama": "TEST_PENGURUS_FORCED_BRANCH",
+                "jabatan": "Pengurus Test",
+                "cabang_id": self.branch_b,
+            },
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        self.pengurus_ids.append(data["id"])
+        assert data["cabang_id"] == self.branch_a
+
+    def test_update_preserves_branch_and_denies_other_branch(self):
+        own = requests.put(
+            f"{API}/pengurus/{self.pengurus_a}",
+            json={"nama": "TEST_PENGURUS_UPDATED", "cabang_id": self.branch_b},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        other = requests.put(
+            f"{API}/pengurus/{self.pengurus_b}",
+            json={"nama": "TEST_PENGURUS_CROSS_BRANCH"},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        assert own.json()["cabang_id"] == self.branch_a
+        assert other.status_code == 404, other.text
+
+    def test_delete_denies_other_branch_record(self):
+        own_record = self._create_pengurus(self.branch_a, "DELETE")
+        other_record = self._create_pengurus(self.branch_b, "DELETE")
+        other = requests.delete(f"{API}/pengurus/{other_record}", headers=H(self.admin_token), timeout=15)
+        own = requests.delete(f"{API}/pengurus/{own_record}", headers=H(self.admin_token), timeout=15)
+        assert other.status_code == 404, other.text
+        assert own.status_code == 200, own.text
+        self.pengurus_ids.remove(own_record)
+
+    def test_bulk_delete_rejects_cross_branch_records_entirely(self):
+        own_record = self._create_pengurus(self.branch_a, "BULK")
+        other_record = self._create_pengurus(self.branch_b, "BULK")
+        mixed = requests.post(
+            f"{API}/pengurus/bulk-delete",
+            json={"ids": [own_record, other_record]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert mixed.status_code == 404, mixed.text
+
+        own = requests.post(
+            f"{API}/pengurus/bulk-delete",
+            json={"ids": [own_record]},
+            headers=H(self.admin_token),
+            timeout=15,
+        )
+        assert own.status_code == 200, own.text
+        self.pengurus_ids.remove(own_record)
+
+
 # ---------- Dashboard ----------
 class TestDashboard:
     def test_stats(self, super_token):

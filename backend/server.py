@@ -424,7 +424,7 @@ def make_crud(name: str, collection: str):
         return {"message": f"{len(ids)} data dihapus"}
 
 for _n, _c in [("cabang", "cabang"),
-               ("pengurus", "pengurus"), ("agenda", "agenda"), ("galeri", "galeri"),
+               ("agenda", "agenda"), ("galeri", "galeri"),
                ("pengumuman", "pengumuman")]:
     make_crud(_n, _c)
 
@@ -527,6 +527,94 @@ async def bulk_delete_jamaah(payload: Dict[str, Any], user: dict = Depends(get_c
 
     await db.jamaah.delete_many(target_query)
     await log_action(user, "DELETE", "jamaah", f"Bulk hapus {len(ids)} data")
+    return {"message": f"{len(ids)} data dihapus"}
+
+
+# ------------------------------------------------------------------ pengurus CRUD with branch scope
+def pengurus_data_scope(user: dict) -> Optional[Dict[str, str]]:
+    require_branch_assignment(user)
+    return get_data_scope(user)
+
+
+def pengurus_query(scope: Optional[Dict[str, str]], query: Optional[dict] = None) -> dict:
+    scoped_query = dict(query or {})
+    if scope is not None:
+        scoped_query.update(scope)
+    return scoped_query
+
+
+@api_router.get("/pengurus")
+async def list_pengurus(user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    docs = await db.pengurus.find(pengurus_query(scope)).sort("created_at", -1).to_list(5000)
+    return [serialize(d) for d in docs]
+
+
+@api_router.get("/pengurus/{item_id}")
+async def get_pengurus(item_id: str, user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    doc = await db.pengurus.find_one(pengurus_query(scope, {"_id": ObjectId(item_id)}))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    return serialize(doc)
+
+
+@api_router.post("/pengurus")
+async def create_pengurus(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    require_write(user)
+    payload.pop("id", None)
+    if scope is not None:
+        payload["cabang_id"] = scope["cabang_id"]
+    payload["created_at"] = now_iso()
+    payload["updated_at"] = now_iso()
+    res = await db.pengurus.insert_one(payload)
+    await log_action(user, "CREATE", "pengurus", payload.get("nama", ""))
+    return serialize(await db.pengurus.find_one({"_id": res.inserted_id}))
+
+
+@api_router.put("/pengurus/{item_id}")
+async def update_pengurus(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    require_write(user)
+    payload.pop("id", None)
+    payload.pop("_id", None)
+    if scope is not None:
+        payload.pop("cabang_id", None)
+    payload["updated_at"] = now_iso()
+    result = await db.pengurus.update_one(
+        pengurus_query(scope, {"_id": ObjectId(item_id)}),
+        {"$set": payload},
+    )
+    if scope is not None and result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await log_action(user, "UPDATE", "pengurus", item_id)
+    return serialize(await db.pengurus.find_one({"_id": ObjectId(item_id)}))
+
+
+@api_router.delete("/pengurus/{item_id}")
+async def delete_pengurus(item_id: str, user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    require_write(user)
+    result = await db.pengurus.delete_one(pengurus_query(scope, {"_id": ObjectId(item_id)}))
+    if scope is not None and result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await log_action(user, "DELETE", "pengurus", item_id)
+    return {"message": "Data dihapus"}
+
+
+@api_router.post("/pengurus/bulk-delete")
+async def bulk_delete_pengurus(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    scope = pengurus_data_scope(user)
+    require_write(user)
+    ids = [ObjectId(i) for i in payload.get("ids", [])]
+    target_query = pengurus_query(scope, {"_id": {"$in": ids}})
+    if scope is not None:
+        matched = await db.pengurus.count_documents(target_query)
+        if matched != len(set(ids)):
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    await db.pengurus.delete_many(target_query)
+    await log_action(user, "DELETE", "pengurus", f"Bulk hapus {len(ids)} data")
     return {"message": f"{len(ids)} data dihapus"}
 
 # ------------------------------------------------------------------ guru
