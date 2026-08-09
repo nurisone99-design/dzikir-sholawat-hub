@@ -9,7 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { User, Save, Lock, ShieldCheck } from "lucide-react";
 
-const ROLE_LABEL = { super_admin: "Super Admin", admin_cabang: "Admin Cabang", viewer: "Viewer" };
+const ROLE_LABEL = {
+  super_admin: "Super Admin",
+  admin_cabang: "Admin Cabang",
+  viewer: "Viewer",
+  penerus_ilmu: "Penerus Ilmu",
+  ketua_yayasan: "Ketua Yayasan",
+};
 
 export default function ProfilAdmin() {
   const { user, setUser } = useAuth();

@@ -21,6 +21,8 @@ const ROLES = [
   { value: "super_admin", label: "Super Admin" },
   { value: "admin_cabang", label: "Admin Cabang" },
   { value: "viewer", label: "Viewer" },
+  { value: "penerus_ilmu", label: "Penerus Ilmu" },
+  { value: "ketua_yayasan", label: "Ketua Yayasan" },
 ];
 const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.value, r.label]));
 

@@ -38,12 +38,23 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
-  const isViewer = user && user.role === "viewer";
+  const isReadOnly =
+    user && ["viewer", "penerus_ilmu", "ketua_yayasan"].includes(user.role);
+  const isViewer = isReadOnly;
   const isSuper = user && user.role === "super_admin";
 
   return (
     <AuthContext.Provider
-      value={{ user, setUser, ready, login, logout, isViewer, isSuper }}
+      value={{
+        user,
+        setUser,
+        ready,
+        login,
+        logout,
+        isReadOnly,
+        isViewer,
+        isSuper,
+      }}
     >
       {children}
     </AuthContext.Provider>

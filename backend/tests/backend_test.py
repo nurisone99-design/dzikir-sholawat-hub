@@ -13,7 +13,15 @@ import pytest
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from access_control import get_data_scope, require_branch_assignment
+from access_control import (
+    get_data_scope,
+    require_branch_assignment,
+    require_official_role,
+    require_roles,
+    require_super_admin,
+    require_write_access,
+    scoped_query,
+)
 from seed import demo_seed_enabled, seed_all
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://dzikir-sholawat-hub.preview.emergentagent.com').rstrip('/')
@@ -85,6 +93,61 @@ class TestBranchScopeHelpers:
             get_data_scope({"role": "unknown", "cabang_id": "cabang-1"})
 
         assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize(
+        "role",
+        ["super_admin", "admin_cabang", "viewer", "penerus_ilmu", "ketua_yayasan"],
+    )
+    def test_official_roles_are_accepted(self, role):
+        assert require_official_role({"role": role}) == role
+
+    @pytest.mark.parametrize("role", ["penerus_ilmu", "ketua_yayasan"])
+    def test_global_readonly_roles_have_unrestricted_read_scope(self, role):
+        assert get_data_scope({"role": role}) is None
+
+    @pytest.mark.parametrize("user", [{}, {"role": "unknown"}, {"role": None}])
+    def test_missing_and_unknown_roles_are_denied_by_default(self, user):
+        with pytest.raises(HTTPException) as exc:
+            require_official_role(user)
+
+        assert exc.value.status_code == 403
+
+    def test_super_admin_guard_is_default_deny(self):
+        require_super_admin({"role": "super_admin"})
+
+        for role in ("admin_cabang", "viewer", "unknown"):
+            with pytest.raises(HTTPException) as exc:
+                require_super_admin({"role": role})
+            assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize("role", ["super_admin", "admin_cabang"])
+    def test_write_access_allows_only_write_roles(self, role):
+        require_write_access({"role": role})
+
+    @pytest.mark.parametrize(
+        "role", ["viewer", "penerus_ilmu", "ketua_yayasan", "unknown"]
+    )
+    def test_write_access_denies_viewer_and_unknown_role(self, role):
+        with pytest.raises(HTTPException) as exc:
+            require_write_access({"role": role})
+        assert exc.value.status_code == 403
+
+    def test_explicit_role_guard_does_not_trust_unlisted_roles(self):
+        require_roles({"role": "viewer"}, {"viewer"})
+
+        with pytest.raises(HTTPException) as exc:
+            require_roles({"role": "unknown"}, {"unknown"})
+        assert exc.value.status_code == 403
+
+    def test_scoped_query_cannot_be_overridden_by_caller_filter(self):
+        assert scoped_query(
+            {"cabang_id": "branch-a"}, {"cabang_id": "branch-b", "status": "active"}
+        ) == {
+            "$and": [
+                {"cabang_id": "branch-a"},
+                {"cabang_id": "branch-b", "status": "active"},
+            ]
+        }
 
 
 # ---------- Public ----------
@@ -188,6 +251,66 @@ class TestRBAC:
     def test_non_super_cannot_backup(self, cabang_token):
         r = requests.get(f"{API}/backup", headers=H(cabang_token), timeout=15)
         assert r.status_code == 403
+
+
+class TestSecurityCoreAuthorization:
+    SUPER_ONLY_GET_ENDPOINTS = ["/users", "/audit-logs", "/settings", "/messages"]
+
+    @pytest.mark.parametrize("endpoint", SUPER_ONLY_GET_ENDPOINTS)
+    def test_super_admin_can_read_super_only_endpoints(self, super_token, endpoint):
+        response = requests.get(f"{API}{endpoint}", headers=H(super_token), timeout=15)
+        assert response.status_code == 200, response.text
+
+    @pytest.mark.parametrize("endpoint", SUPER_ONLY_GET_ENDPOINTS)
+    @pytest.mark.parametrize("token_fixture", ["cabang_token", "viewer_token"])
+    def test_non_super_roles_cannot_read_super_only_endpoints(
+        self, request, endpoint, token_fixture
+    ):
+        token = request.getfixturevalue(token_fixture)
+        response = requests.get(f"{API}{endpoint}", headers=H(token), timeout=15)
+        assert response.status_code == 403, response.text
+
+    @pytest.mark.parametrize("endpoint", SUPER_ONLY_GET_ENDPOINTS)
+    def test_super_only_endpoints_require_authentication(self, endpoint):
+        response = requests.get(f"{API}{endpoint}", timeout=15)
+        assert response.status_code == 401, response.text
+
+    @pytest.mark.parametrize("token_fixture", ["cabang_token", "viewer_token"])
+    def test_non_super_roles_cannot_update_private_settings(self, request, token_fixture):
+        token = request.getfixturevalue(token_fixture)
+        response = requests.put(
+            f"{API}/settings",
+            json={"nama": "SHOULD_NOT_BE_APPLIED"},
+            headers=H(token),
+            timeout=15,
+        )
+        assert response.status_code == 403, response.text
+
+    @pytest.mark.parametrize("token_fixture", ["cabang_token", "viewer_token"])
+    def test_non_super_roles_cannot_delete_messages(self, request, token_fixture):
+        token = request.getfixturevalue(token_fixture)
+        response = requests.delete(
+            f"{API}/messages/000000000000000000000000",
+            headers=H(token),
+            timeout=15,
+        )
+        assert response.status_code == 403, response.text
+
+    def test_viewer_upload_is_forbidden_and_creates_no_local_file(self, viewer_token):
+        upload_root = Path(__file__).resolve().parents[1] / "uploads"
+        before = {path.resolve() for path in upload_root.rglob("*") if path.is_file()}
+
+        response = requests.post(
+            f"{API}/upload/jamaah",
+            files={"file": ("forbidden.png", io.BytesIO(b"not-an-image"), "image/png")},
+            headers=H(viewer_token),
+            timeout=15,
+        )
+
+        after = {path.resolve() for path in upload_root.rglob("*") if path.is_file()}
+        assert response.status_code == 403, response.text
+        assert "url" not in response.text
+        assert after == before
 
 
 # ---------- CRUD Cabang ----------

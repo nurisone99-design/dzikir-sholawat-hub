@@ -22,6 +22,7 @@ def require_min_length(name: str, min_length: int) -> str:
 
 import os
 import io
+import json
 from PIL import Image
 import logging
 import asyncio
@@ -31,7 +32,6 @@ from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 from typing import List, Optional, Any, Dict, Annotated
 import certifi
-from pymongo import MongoClient
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query, UploadFile, File
@@ -57,7 +57,14 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from access_control import get_data_scope, require_branch_assignment
+from access_control import (
+    get_data_scope,
+    is_branch_scoped,
+    require_branch_assignment,
+    require_official_role,
+    require_super_admin as require_super,
+    require_write_access as require_write,
+)
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -71,10 +78,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = (
     "default-src 'self'; "
     "img-src 'self' data: https:; "
-    "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self'; "
-    "font-src 'self' data:; "
-    "connect-src 'self' http://localhost:8000;"
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "connect-src 'self' http://localhost:8000 ws://localhost:8000;"
 )
         
         return response
@@ -86,7 +93,12 @@ JWT_SECRET = require_min_length("JWT_SECRET", 32)
 
 client = AsyncIOMotorClient(
     mongo_url,
-    tlsCAFile=certifi.where()
+    # Atlas requires TLS. certifi supplies a current CA bundle independently
+    # from the operating-system certificate store.
+    tls=True,
+    tlsCAFile=certifi.where(),
+    connectTimeoutMS=10000,
+    serverSelectionTimeoutMS=20000,
 )
 
 db = client[db_name]
@@ -228,19 +240,13 @@ async def get_current_user(request: Request,
             raise HTTPException(status_code=401, detail="Pengguna tidak ditemukan")
         if user.get("status", "active") != "active":
             raise HTTPException(status_code=403, detail="Akun tidak aktif")
-        return serialize(user)
+        serialized_user = serialize(user)
+        require_official_role(serialized_user)
+        return serialized_user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesi berakhir, silakan login kembali")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token tidak valid")
-
-def require_write(user: dict):
-    if user.get("role") == "viewer":
-        raise HTTPException(status_code=403, detail="Akses hanya-baca. Anda tidak memiliki izin.")
-
-def require_super(user: dict):
-    if user.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Hanya Super Admin yang diizinkan.")
 
 async def log_action(user: dict, action: str, entity: str, details: str = ""):
     await db.audit_logs.insert_one({
@@ -290,7 +296,8 @@ async def login(request: Request, data: LoginInput):
         raise HTTPException(status_code=401, detail="Email atau kata sandi salah")
     if user.get("status", "active") != "active":
         raise HTTPException(status_code=403, detail="Akun tidak aktif")
-    token = create_access_token(str(user["_id"]), user.get("role", "viewer"))
+    role = require_official_role(user)
+    token = create_access_token(str(user["_id"]), role)
     await db.audit_logs.insert_one({"user_id": str(user["_id"]),
         "username": user.get("username"), "action": "LOGIN", "entity": "auth",
         "details": "Login berhasil", "timestamp": now_iso()})
@@ -323,12 +330,14 @@ async def change_password(data: PasswordChange, user: dict = Depends(get_current
 # ------------------------------------------------------------------ user management
 @api_router.get("/users")
 async def list_users(user: dict = Depends(get_current_user)):
+    require_super(user)
     docs = await db.users.find().sort("created_at", -1).to_list(1000)
     return [serialize(d) for d in docs]
 
 @api_router.post("/users")
 async def create_user(data: UserCreate, user: dict = Depends(get_current_user)):
     require_super(user)
+    require_official_role({"role": data.role})
     email = data.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email sudah terdaftar")
@@ -343,6 +352,8 @@ async def create_user(data: UserCreate, user: dict = Depends(get_current_user)):
 @api_router.put("/users/{uid}")
 async def update_user(uid: str, data: UserUpdate, user: dict = Depends(get_current_user)):
     require_super(user)
+    if data.role is not None:
+        require_official_role({"role": data.role})
     upd = {k: v for k, v in data.model_dump().items() if v is not None}
     if "password" in upd:
         upd["password_hash"] = hash_password(upd.pop("password"))
@@ -423,10 +434,109 @@ def make_crud(name: str, collection: str):
         await log_action(user, "DELETE", collection, f"Bulk hapus {len(ids)} data")
         return {"message": f"{len(ids)} data dihapus"}
 
-for _n, _c in [("cabang", "cabang"),
-               ("agenda", "agenda"), ("galeri", "galeri"),
-               ("pengumuman", "pengumuman")]:
+for _n, _c in [("cabang", "cabang"), ("pengumuman", "pengumuman")]:
     make_crud(_n, _c)
+
+
+# ------------------------------------------------ global read + branch-scoped write CRUD
+async def valid_branch_scope(user: dict) -> Optional[Dict[str, str]]:
+    """Validate branch-scoped users and return their mandatory branch filter."""
+    if not is_branch_scoped(user):
+        return None
+
+    require_branch_assignment(user)
+    cabang_id = user["cabang_id"]
+    if not ObjectId.is_valid(cabang_id):
+        raise HTTPException(status_code=403, detail="Assignment cabang tidak valid.")
+
+    assigned_branch = await db.cabang.find_one(
+        {"_id": ObjectId(cabang_id)}, {"_id": 1}
+    )
+    if not assigned_branch:
+        raise HTTPException(status_code=403, detail="Assignment cabang tidak valid.")
+    return {"cabang_id": str(cabang_id)}
+
+
+def make_global_read_branch_write_crud(name: str, collection: str):
+    @api_router.get(f"/{name}")
+    async def _list(user: dict = Depends(get_current_user)):
+        await valid_branch_scope(user)
+        docs = await db[collection].find().sort("created_at", -1).to_list(5000)
+        return [serialize(d) for d in docs]
+
+    @api_router.get(f"/{name}/{{item_id}}")
+    async def _get(item_id: str, user: dict = Depends(get_current_user)):
+        await valid_branch_scope(user)
+        doc = await db[collection].find_one({"_id": ObjectId(item_id)})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        return serialize(doc)
+
+    @api_router.post(f"/{name}")
+    async def _create(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+        require_write(user)
+        scope = await valid_branch_scope(user)
+        payload.pop("id", None)
+        payload.pop("_id", None)
+        if scope is not None:
+            payload["cabang_id"] = scope["cabang_id"]
+        payload["created_at"] = now_iso()
+        payload["updated_at"] = now_iso()
+        result = await db[collection].insert_one(payload)
+        await log_action(
+            user, "CREATE", collection, payload.get("nama") or payload.get("judul") or ""
+        )
+        return serialize(await db[collection].find_one({"_id": result.inserted_id}))
+
+    @api_router.put(f"/{name}/{{item_id}}")
+    async def _update(
+        item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)
+    ):
+        require_write(user)
+        scope = await valid_branch_scope(user)
+        payload.pop("id", None)
+        payload.pop("_id", None)
+        if scope is not None:
+            payload.pop("cabang_id", None)
+        payload["updated_at"] = now_iso()
+        target_query = {"_id": ObjectId(item_id), **(scope or {})}
+        result = await db[collection].update_one(target_query, {"$set": payload})
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        await log_action(user, "UPDATE", collection, item_id)
+        return serialize(await db[collection].find_one(target_query))
+
+    @api_router.delete(f"/{name}/{{item_id}}")
+    async def _delete(item_id: str, user: dict = Depends(get_current_user)):
+        require_write(user)
+        scope = await valid_branch_scope(user)
+        result = await db[collection].delete_one(
+            {"_id": ObjectId(item_id), **(scope or {})}
+        )
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        await log_action(user, "DELETE", collection, item_id)
+        return {"message": "Data dihapus"}
+
+    @api_router.post(f"/{name}/bulk-delete")
+    async def _bulk_delete(
+        payload: Dict[str, Any], user: dict = Depends(get_current_user)
+    ):
+        require_write(user)
+        scope = await valid_branch_scope(user)
+        ids = [ObjectId(i) for i in payload.get("ids", [])]
+        target_query = {"_id": {"$in": ids}, **(scope or {})}
+        if scope is not None:
+            matched = await db[collection].count_documents(target_query)
+            if matched != len(set(ids)):
+                raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        await db[collection].delete_many(target_query)
+        await log_action(user, "DELETE", collection, f"Bulk hapus {len(ids)} data")
+        return {"message": f"{len(ids)} data dihapus"}
+
+
+for _n, _c in [("agenda", "agenda"), ("galeri", "galeri")]:
+    make_global_read_branch_write_crud(_n, _c)
 
 # ------------------------------------------------------------------ jamaah CRUD with branch scope
 def jamaah_data_scope(user: dict) -> Optional[Dict[str, str]]:
@@ -835,32 +945,46 @@ async def public_contact(data: ContactInput):
 
 @api_router.get("/messages")
 async def list_messages(user: dict = Depends(get_current_user)):
+    require_super(user)
     docs = await db.messages.find().sort("created_at", -1).to_list(1000)
     return [serialize(d) for d in docs]
 
 @api_router.delete("/messages/{mid}")
 async def delete_message(mid: str, user: dict = Depends(get_current_user)):
-    require_write(user)
+    require_super(user)
     await db.messages.delete_one({"_id": ObjectId(mid)})
     return {"message": "Pesan dihapus"}
 
 # ------------------------------------------------------------------ dashboard
 @api_router.get("/dashboard/stats")
 async def dashboard_stats(user: dict = Depends(get_current_user)):
-    total_jamaah = await db.jamaah.count_documents({})
+    scope = await valid_branch_scope(user)
+    jamaah_filter = jamaah_query(scope)
+    guru_filter = guru_query(scope)
+    pengurus_filter = dict(scope or {})
+
+    total_jamaah = await db.jamaah.count_documents(jamaah_filter)
     now = datetime.now(timezone.utc).isoformat()
     active_events = await db.agenda.count_documents({"tanggal": {"$gte": now[:10]}})
-    cabang_list = await db.cabang.find().to_list(1000)
+    cabang_filter = (
+        {"_id": ObjectId(scope["cabang_id"])} if scope is not None else {}
+    )
+    cabang_list = await db.cabang.find(cabang_filter).to_list(1000)
     per_cabang = []
     for c in cabang_list:
         cnt = await db.jamaah.count_documents({"cabang_id": str(c["_id"])})
         per_cabang.append({"kota": c.get("kota", "-"), "jamaah": cnt})
-    male = await db.jamaah.count_documents({"gender": "Laki-laki"})
-    female = await db.jamaah.count_documents({"gender": "Perempuan"})
+    male = await db.jamaah.count_documents(
+        jamaah_query(scope, {"gender": "Laki-laki"})
+    )
+    female = await db.jamaah.count_documents(
+        jamaah_query(scope, {"gender": "Perempuan"})
+    )
     upcoming = await db.agenda.find({"tanggal": {"$gte": now[:10]}}).sort("tanggal", 1).to_list(5)
     return {
-        "total_cabang": await db.cabang.count_documents({}),
-        "total_guru": await db.guru.count_documents({}),
+        "total_cabang": await db.cabang.count_documents(cabang_filter),
+        "total_guru": await db.guru.count_documents(guru_filter),
+        "total_pengurus": await db.pengurus.count_documents(pengurus_filter),
         "total_jamaah": total_jamaah,
         "active_events": active_events,
         "per_cabang": per_cabang,
@@ -871,18 +995,20 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
 # ------------------------------------------------------------------ audit log
 @api_router.get("/audit-logs")
 async def audit_logs(user: dict = Depends(get_current_user)):
+    require_super(user)
     docs = await db.audit_logs.find().sort("timestamp", -1).to_list(1000)
     return [serialize(d) for d in docs]
 
 # ------------------------------------------------------------------ settings
 @api_router.get("/settings")
 async def get_settings(user: dict = Depends(get_current_user)):
+    require_super(user)
     doc = await db.settings.find_one({"key": "yayasan"})
     return serialize(doc) if doc else {}
 
 @api_router.put("/settings")
 async def update_settings(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
-    require_write(user)
+    require_super(user)
     payload.pop("id", None)
     payload.pop("_id", None)
     payload["key"] = "yayasan"
@@ -950,21 +1076,116 @@ COLUMN_TITLE_MAP = {
     "lokasi": "Lokasi",
     "deskripsi": "Deskripsi",
     "jumlah_jamaah": "Jumlah Jamaah",
-    "kota": "Kota"
+    "kota": "Kota",
+    "target": "Target",
+    "kategori": "Kategori",
+    "type": "Tipe",
+    "url": "URL",
+    "published": "Dipublikasikan",
+    "status": "Status",
 }
 
+# Explicit export whitelists. Never derive exportable columns from MongoDB documents.
 DEFAULT_COLUMNS = {
     "jamaah": ["id", "nama", "nik", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "no_hp", "nama_ortu", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
     "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah"],
     "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],
     "agenda": ["judul", "tanggal", "waktu", "lokasi", "deskripsi"],
+    "galeri": ["judul", "kategori", "type", "url", "published"],
+    "pengumuman": ["judul", "tanggal", "deskripsi", "status"],
 }
 
+EXPORT_FIELDS = {
+    "jamaah": ["id", "id_jamaah", "nama", "nik", "no_ktp", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "cabang_nama", "no_hp", "nama_ortu", "nama_orang_tua", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
+    "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah", "no_hp", "alamat", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],
+    "agenda": ["judul", "tanggal", "waktu", "lokasi", "deskripsi", "target", "cabang_nama"],
+    "galeri": ["judul", "kategori", "type", "url", "published", "cabang_nama"],
+    "pengumuman": ["judul", "tanggal", "deskripsi", "status", "cabang_nama"],
+}
+
+EXPORT_PRESETS = {
+    "jamaah": [
+        {"key": "default", "label": "Default", "fields": DEFAULT_COLUMNS["jamaah"]},
+        {"key": "data_dasar", "label": "Data Dasar", "fields": ["nama", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "no_hp"]},
+        {"key": "data_keanggotaan", "label": "Data Keanggotaan", "fields": ["id_jamaah", "nama", "cabang_nama", "ijazah_kitab", "ijazah_amaliah"]},
+        {"key": "usulan_nama_dalam", "label": "Usulan Nama Dalam", "fields": ["gender", "nama", "nama_orang_tua", "ijazah_nama_dalam"]},
+    ]
+}
+
+
+def export_presets(entity: str) -> List[dict]:
+    presets = EXPORT_PRESETS.get(entity)
+    if presets:
+        return presets
+    return [{"key": "default", "label": "Default", "fields": DEFAULT_COLUMNS[entity]}]
+
+
+def parse_export_fields(raw_fields: Optional[str], entity: str, preset: Optional[str]) -> List[str]:
+    requested = raw_fields.strip() if raw_fields else ""
+    if requested:
+        try:
+            parsed = json.loads(requested)
+            keys = parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            keys = requested.split(",")
+        keys = [str(key).strip() for key in keys if str(key).strip()]
+    elif preset:
+        matched = next((item for item in export_presets(entity) if item["key"] == preset), None)
+        if not matched:
+            raise HTTPException(status_code=400, detail="Preset export tidak valid")
+        keys = list(matched["fields"])
+    else:
+        keys = list(DEFAULT_COLUMNS[entity])
+
+    if not keys:
+        raise HTTPException(status_code=400, detail="Kolom export tidak boleh kosong")
+    illegal = [key for key in keys if key not in EXPORT_FIELDS[entity]]
+    if illegal:
+        raise HTTPException(status_code=400, detail=f"Kolom export tidak valid: {', '.join(illegal)}")
+    return keys
+
+
+def export_value(row: dict, key: str, entity: str) -> str:
+    value = row.get(key)
+    if value is None or value == "":
+        if key in ("nik", "no_ktp"):
+            value = row.get("nik") or row.get("no_ktp") or ""
+        elif key in ("nama_ortu", "nama_orang_tua"):
+            value = row.get("nama_orang_tua") or row.get("nama_ortu") or ""
+        elif key in ("cabang", "cabang_nama", "id_cabang"):
+            value = row.get("cabang_nama") or row.get("cabang") or ""
+        elif key in ("id", f"id_{entity}"):
+            value = row.get(f"id_{entity}") or row.get("id") or ""
+    if isinstance(value, list):
+        value = ", ".join(map(str, value))
+    return str(value) if value is not None else ""
+
+
+@api_router.get("/export/fields/{entity}")
+async def get_export_fields(entity: str, user: dict = Depends(get_current_user)):
+    require_official_role(user)
+    if entity not in DEFAULT_COLUMNS:
+        raise HTTPException(status_code=400, detail="Entitas tidak valid")
+    defaults = set(DEFAULT_COLUMNS[entity])
+    return {
+        "resource": entity,
+        "fields": [
+            {"key": key, "label": COLUMN_TITLE_MAP.get(key, key.replace("_", " ").title()), "default": key in defaults}
+            for key in EXPORT_FIELDS[entity]
+        ],
+        "presets": export_presets(entity),
+    }
+
+
 @api_router.get("/export-options/cabang")
-async def get_export_cabang_options():
+async def get_export_cabang_options(user: dict = Depends(get_current_user)):
     """ Helper API untuk Frontend menampilkan Nama Kota pada Checkbox / Select Cabang """
-    docs = await db.cabang.find().sort("kota", 1).to_list(1000)
+    scope = await valid_branch_scope(user)
+    query = {"_id": ObjectId(scope["cabang_id"])} if scope is not None else {}
+    docs = await db.cabang.find(query).sort("kota", 1).to_list(1000)
     return [{"id": str(d["_id"]), "nama": d.get("kota") or d.get("nama") or "Cabang Tanpa Nama"} for d in docs]
 
 async def build_rows(entity: str, filters: dict):
@@ -974,6 +1195,12 @@ async def build_rows(entity: str, filters: dict):
     for c in cabang_docs:
         c_id = str(c["_id"])
         cabang_map[c_id] = c.get("kota") or c.get("nama") or "-"
+
+    guru_docs = await db.guru.find().to_list(1000) if entity == "jamaah" else []
+    guru_map = {str(g["_id"]): g.get("nama") or "-" for g in guru_docs}
+    cabang_guru_map = {
+        str(c["_id"]): str(c.get("guru_id") or "") for c in cabang_docs
+    }
 
     docs = await db[entity].find(filters).to_list(100000)
     rows = []
@@ -988,10 +1215,53 @@ async def build_rows(entity: str, filters: dict):
         d["cabang_nama"] = nama_kota
         d["cabang"] = nama_kota
         d["id_cabang"] = nama_kota
+        guru_id = str(d.get("guru_id") or cabang_guru_map.get(raw_c) or "")
+        d["guru_pembimbing_nama"] = guru_map.get(guru_id, d.get("guru_pembimbing_nama") or "-")
         
         rows.append(d)
         
     return rows
+
+
+async def export_query(entity: str, user: dict, requested_branch: Optional[str], gender: Optional[str]) -> dict:
+    scope = await valid_branch_scope(user)
+    branch_owned = {"jamaah", "guru", "pengurus", "pengumuman"}
+
+    if entity == "guru":
+        filters = guru_query(scope) if scope is not None else {}
+    elif entity in branch_owned:
+        filters = dict(scope or {})
+    elif entity == "cabang" and scope is not None:
+        filters = {"_id": ObjectId(scope["cabang_id"])}
+    else:
+        filters = {}
+
+    # A client filter may narrow global scope, but never replace a mandatory branch scope.
+    can_apply_branch_filter = scope is None
+    if requested_branch and can_apply_branch_filter:
+        c_str = str(requested_branch).strip()
+        if c_str.lower() not in {"all", "", "null", "undefined", "none"}:
+            conditions = [{"cabang_id": c_str}, {"cabang": c_str}]
+            if ObjectId.is_valid(c_str):
+                conditions.append({"cabang_id": ObjectId(c_str)})
+                if entity == "cabang":
+                    conditions.append({"_id": ObjectId(c_str)})
+            filters = {"$and": [filters, {"$or": conditions}]} if filters else {"$or": conditions}
+
+    if gender and entity == "jamaah":
+        g_str = str(gender).strip()
+        if g_str.lower() not in {"all", "", "null", "undefined", "none"}:
+            gender_filter = {"gender": {"$regex": f"^{g_str}$", "$options": "i"}}
+            filters = {"$and": [filters, gender_filter]} if filters else gender_filter
+    return filters
+
+
+def usulan_document_headers(rows: List[dict]) -> tuple[str, str]:
+    branches = {row.get("cabang_nama") for row in rows if row.get("cabang_nama") not in (None, "", "-")}
+    teachers = {row.get("guru_pembimbing_nama") for row in rows if row.get("guru_pembimbing_nama") not in (None, "", "-")}
+    branch_label = next(iter(branches)) if len(branches) == 1 else "Semua Cabang"
+    teacher_label = next(iter(teachers)) if len(teachers) == 1 else "Semua Guru Pembimbing"
+    return branch_label, teacher_label
 
 @api_router.get("/export/{entity}")
 async def export_data(entity: str, 
@@ -1000,68 +1270,44 @@ async def export_data(entity: str,
                       cabang_id: Optional[str] = Query(None),
                       gender: Optional[str] = Query(None),
                       columns: Optional[str] = Query(None),
+                      fields: Optional[str] = None,
+                      preset: Optional[str] = None,
                       user: dict = Depends(get_current_user)):
     
     if entity not in DEFAULT_COLUMNS:
         raise HTTPException(status_code=400, detail="Entitas tidak valid")
     
-    filters = {}
-    valid_cabang = cabang or cabang_id
-    if valid_cabang:
-        c_str = str(valid_cabang).strip()
-        if c_str.lower() not in ["all", "", "null", "undefined", "none"]:
-            or_conds = [
-                {"cabang_id": c_str},
-                {"cabang": c_str}
-            ]
-            if ObjectId.is_valid(c_str):
-                or_conds.append({"cabang_id": ObjectId(c_str)})
-                or_conds.append({"_id": ObjectId(c_str)})
-            filters["$or"] = or_conds
-
-    if gender:
-        g_str = str(gender).strip()
-        if g_str.lower() not in ["all", "", "null", "undefined", "none"]:
-            filters["gender"] = {"$regex": f"^{g_str}$", "$options": "i"}
-
+    if format not in {"xlsx", "pdf"}:
+        raise HTTPException(status_code=400, detail="Format export tidak valid")
+    filters = await export_query(entity, user, cabang or cabang_id, gender)
     rows = await build_rows(entity, filters)
-
-    if columns and columns.strip():
-        req_keys = [c.strip() for c in columns.split(",") if c.strip()]
-        active_keys = req_keys if req_keys else DEFAULT_COLUMNS[entity]
-    else:
-        active_keys = DEFAULT_COLUMNS[entity]
-
+    active_keys = parse_export_fields(fields or columns, entity, preset)
     headers = [COLUMN_TITLE_MAP.get(k, k.replace("_", " ").title()) for k in active_keys]
+    is_usulan = entity == "jamaah" and preset == "usulan_nama_dalam"
+    if is_usulan:
+        usulan_labels = {"gender": "Gender", "nama": "Nama", "nama_orang_tua": "Nama Orang Tua", "ijazah_nama_dalam": "Ijazah Nama Dalam"}
+        headers = [usulan_labels.get(key, COLUMN_TITLE_MAP.get(key, key.replace("_", " ").title())) for key in active_keys]
+    document_title = f"USULAN NAMA DALAM ({datetime.now(timezone.utc).year})" if is_usulan else None
+    branch_label, teacher_label = usulan_document_headers(rows) if is_usulan else (None, None)
 
     await log_action(user, "EXPORT", entity, f"Export {format} ({len(rows)} baris)")
 
     if format == "xlsx":
-        df_data = []
-        for r in rows:
-            row_dict = {}
-            for k, header in zip(active_keys, headers):
-                val = r.get(k)
-                if val is None or val == "":
-                    if k in ("nik", "no_ktp"):
-                        val = r.get("nik") or r.get("no_ktp") or ""
-                    elif k in ("nama_ortu", "nama_orang_tua"):
-                        val = r.get("nama_ortu") or r.get("nama_orang_tua") or ""
-                    elif k in ("cabang", "cabang_nama", "id_cabang"):
-                        val = r.get("cabang_nama") or r.get("cabang") or r.get("cabang_id") or ""
-                    elif k in ("id", f"id_{entity}"):
-                        val = r.get(f"id_{entity}") or r.get("id") or ""
-
-                if isinstance(val, list):
-                    val = ", ".join(map(str, val))
-                row_dict[header] = str(val) if val is not None else ""
-            df_data.append(row_dict)
+        df_data = [{header: export_value(row, key, entity) for key, header in zip(active_keys, headers)} for row in rows]
 
         df = pd.DataFrame(df_data, columns=headers)
         
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            df.to_excel(w, index=False, sheet_name=entity.capitalize())
+            start_row = 5 if is_usulan else 0
+            df.to_excel(w, index=False, sheet_name=entity.capitalize(), startrow=start_row)
+            if is_usulan:
+                sheet = w.sheets[entity.capitalize()]
+                sheet.cell(1, 1, document_title)
+                sheet.cell(3, 1, "Cabang")
+                sheet.cell(3, 2, branch_label)
+                sheet.cell(4, 1, "Guru Pembimbing")
+                sheet.cell(4, 2, teacher_label)
         buf.seek(0)
         
         return StreamingResponse(
@@ -1077,32 +1323,27 @@ async def export_data(entity: str,
     title_style = ParagraphStyle("t", parent=styles["Title"], textColor=colors.HexColor("#0F766E"), fontSize=16)
     sub_style = ParagraphStyle("s", parent=styles["Normal"], textColor=colors.HexColor("#C5A059"), fontSize=10, alignment=1)
     
-    elems = [
-        Paragraph(settings.get("nama", "Yayasan Raudhatul Jannah"), title_style),
-        Paragraph("Majelis Dzikir dan Sholawat Raudhatul Jannah", sub_style),
-        Spacer(1, 6*mm),
-        Paragraph(f"Laporan Data {entity.capitalize()}", ParagraphStyle("h", parent=styles["Heading2"])),
-        Spacer(1, 4*mm)
-    ]
+    if is_usulan:
+        elems = [
+            Paragraph(document_title, title_style), Spacer(1, 4*mm),
+            Paragraph(f"Cabang : {branch_label}", styles["Normal"]),
+            Paragraph(f"Guru Pembimbing : {teacher_label}", styles["Normal"]),
+            Spacer(1, 4*mm),
+        ]
+    else:
+        elems = [
+            Paragraph(settings.get("nama", "Yayasan Raudhatul Jannah"), title_style),
+            Paragraph("Majelis Dzikir dan Sholawat Raudhatul Jannah", sub_style),
+            Spacer(1, 6*mm),
+            Paragraph(f"Laporan Data {entity.capitalize()}", ParagraphStyle("h", parent=styles["Heading2"])),
+            Spacer(1, 4*mm)
+        ]
     
     table_data = [headers]
     for r in rows:
         row_vals = []
         for k in active_keys:
-            val = r.get(k)
-            if val is None or val == "":
-                if k in ("nik", "no_ktp"):
-                    val = r.get("nik") or r.get("no_ktp") or ""
-                elif k in ("nama_ortu", "nama_orang_tua"):
-                    val = r.get("nama_ortu") or r.get("nama_orang_tua") or ""
-                elif k in ("cabang", "cabang_nama", "id_cabang"):
-                    val = r.get("cabang_nama") or r.get("cabang") or ""
-                elif k in ("id", f"id_{entity}"):
-                    val = r.get(f"id_{entity}") or r.get("id") or ""
-
-            if isinstance(val, list):
-                val = ", ".join(map(str, val))
-            row_vals.append(str(val if val is not None else ""))
+            row_vals.append(export_value(r, k, entity))
         table_data.append(row_vals)
 
     t = Table(table_data, repeatRows=1)
@@ -1131,6 +1372,8 @@ async def upload_file(
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
 ):
+    require_write(user)
+    await valid_branch_scope(user)
     allowed = {"guru", "jamaah", "pengurus", "galeri", "sk"}
 
     if folder not in allowed:

@@ -62,14 +62,24 @@ const NAV = [
     items: [
       { to: "/admin/agenda", label: "Agenda Majelis", icon: CalendarDays },
       { to: "/admin/galeri", label: "Galeri", icon: Images },
-      { to: "/admin/pesan", label: "Pesan Masuk", icon: MessageSquare },
+      {
+        to: "/admin/pesan",
+        label: "Pesan Masuk",
+        icon: MessageSquare,
+        super: true,
+      },
     ],
   },
   {
     section: "Laporan & Sistem",
     items: [
       { to: "/admin/laporan", label: "Laporan & Export", icon: FileBarChart },
-      { to: "/admin/audit", label: "Audit Log", icon: ScrollText },
+      {
+        to: "/admin/audit",
+        label: "Audit Log",
+        icon: ScrollText,
+        super: true,
+      },
       {
         to: "/admin/pengaturan",
         label: "Pengaturan",
@@ -85,6 +95,8 @@ const ROLE_LABEL = {
   super_admin: "Super Admin",
   admin_cabang: "Admin Cabang",
   viewer: "Viewer",
+  penerus_ilmu: "Penerus Ilmu",
+  ketua_yayasan: "Ketua Yayasan",
 };
 
 export default function AdminLayout() {
