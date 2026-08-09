@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { ROLE_LABELS } from "@/lib/permissions";
+import { NAV, filterVisibleNavigation } from "./navigation";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -17,92 +18,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  LayoutDashboard,
-  Building2,
-  GraduationCap,
-  Users,
-  UserCog,
-  ShieldCheck,
-  CalendarDays,
-  Images,
-  FileBarChart,
-  ScrollText,
-  Settings,
-  User,
   LogOut,
   Menu,
   X,
-  Moon,
-  MessageSquare,
 } from "lucide-react";
-
-const NAV = [
-  {
-    section: "Utama",
-    items: [
-      { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    ],
-  },
-  {
-    section: "Master Data",
-    items: [
-      { to: "/admin/cabang", label: "Data Cabang", icon: Building2 },
-      { to: "/admin/guru", label: "Data Guru", icon: GraduationCap },
-      { to: "/admin/jamaah", label: "Data Jamaah", icon: Users },
-      { to: "/admin/pengurus", label: "Data Pengurus", icon: UserCog },
-      {
-        to: "/admin/users",
-        label: "Manajemen User",
-        icon: ShieldCheck,
-      },
-    ],
-  },
-  {
-    section: "Kegiatan",
-    items: [
-      { to: "/admin/agenda", label: "Agenda Majelis", icon: CalendarDays },
-      { to: "/admin/galeri", label: "Galeri", icon: Images },
-      {
-        to: "/admin/pesan",
-        label: "Pesan Masuk",
-        icon: MessageSquare,
-      },
-    ],
-  },
-  {
-    section: "Laporan & Sistem",
-    items: [
-      { to: "/admin/laporan", label: "Laporan & Export", icon: FileBarChart },
-      {
-        to: "/admin/audit",
-        label: "Audit Log",
-        icon: ScrollText,
-      },
-      {
-        to: "/admin/pengaturan",
-        label: "Pengaturan",
-        icon: Settings,
-      },
-      { to: "/admin/profil", label: "Profil Admin", icon: User },
-    ],
-  },
-];
-
-const NAV_RESOURCE = Object.freeze({
-  "/admin/dashboard": "dashboard",
-  "/admin/cabang": "cabang",
-  "/admin/guru": "guru",
-  "/admin/jamaah": "jamaah",
-  "/admin/pengurus": "pengurus",
-  "/admin/users": "users",
-  "/admin/agenda": "agenda",
-  "/admin/galeri": "galeri",
-  "/admin/pesan": "messages",
-  "/admin/laporan": "export",
-  "/admin/audit": "audit_logs",
-  "/admin/pengaturan": "settings",
-  "/admin/profil": "profile",
-});
 
 export default function AdminLayout() {
   const { user, logout, canViewResource } = useAuth();
@@ -138,15 +57,13 @@ export default function AdminLayout() {
       </div>
 
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-5">
-        {NAV.map((grp) => (
+        {filterVisibleNavigation(NAV, canViewResource).map((grp) => (
           <div key={grp.section}>
             <p className="px-3 mb-1.5 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
               {grp.section}
             </p>
             <div className="space-y-0.5">
-              {grp.items
-                .filter((item) => canViewResource(NAV_RESOURCE[item.to]))
-                .map((item) => (
+              {grp.items.map((item) => (
                   <NavLink
                     key={item.to}
                     to={item.to}
@@ -162,7 +79,7 @@ export default function AdminLayout() {
                   >
                     <item.icon className="h-[18px] w-[18px]" /> {item.label}
                   </NavLink>
-                ))}
+              ))}
             </div>
           </div>
         ))}
