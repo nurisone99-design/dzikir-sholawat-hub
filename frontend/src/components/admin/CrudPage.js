@@ -38,6 +38,10 @@ import {
 import { Plus, X } from "lucide-react";
 import MapPicker from "@/components/admin/MapPicker";
 import FileUpload from "@/components/admin/FileUpload";
+import {
+  executeAuthorizedMutation,
+  resolveCrudResource,
+} from "@/components/admin/crudAuthorization";
 
 export default function CrudPage({
   title,
@@ -52,8 +56,9 @@ export default function CrudPage({
   extraOptions = {},
   lookups = [],
 }) {
-  const { isViewer } = useAuth();
-  const canWrite = !isViewer;
+  const { canWriteResource } = useAuth();
+  const resource = resolveCrudResource(endpoint);
+  const canWrite = canWriteResource(resource);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [options, setOptions] = useState(extraOptions);
@@ -187,6 +192,10 @@ export default function CrudPage({
   };
 
   const save = async () => {
+    if (!canWrite) {
+      toast.error("Anda tidak memiliki izin untuk mengubah data ini.");
+      return;
+    }
     for (const f of fields) {
       if (f.required && (form[f.key] === "" || form[f.key] == null)) {
         toast.error(`${f.label} wajib diisi`);
@@ -203,11 +212,19 @@ export default function CrudPage({
           .filter(Boolean);
     });
     try {
+      const result = await executeAuthorizedMutation({
+        allowed: canWrite,
+        onDenied: () =>
+          toast.error("Anda tidak memiliki izin untuk mengubah data ini."),
+        mutation: () =>
+          editing
+            ? api.put(`/${endpoint}/${editing.id}`, payload)
+            : api.post(`/${endpoint}`, payload),
+      });
+      if (!result.executed) return;
       if (editing) {
-        await api.put(`/${endpoint}/${editing.id}`, payload);
         toast.success("Data berhasil diperbarui");
       } else {
-        await api.post(`/${endpoint}`, payload);
         toast.success("Data berhasil ditambahkan");
       }
       setOpen(false);
@@ -221,7 +238,13 @@ export default function CrudPage({
 
   const doDelete = async () => {
     try {
-      await api.delete(`/${endpoint}/${deleteTarget.id}`);
+      const result = await executeAuthorizedMutation({
+        allowed: canWrite,
+        onDenied: () =>
+          toast.error("Anda tidak memiliki izin untuk menghapus data ini."),
+        mutation: () => api.delete(`/${endpoint}/${deleteTarget.id}`),
+      });
+      if (!result.executed) return;
       toast.success("Data dihapus");
       setDeleteTarget(null);
       load();
@@ -232,7 +255,13 @@ export default function CrudPage({
 
   const bulkDelete = async (ids) => {
     try {
-      await api.post(`/${endpoint}/bulk-delete`, { ids });
+      const result = await executeAuthorizedMutation({
+        allowed: canWrite,
+        onDenied: () =>
+          toast.error("Anda tidak memiliki izin untuk menghapus data ini."),
+        mutation: () => api.post(`/${endpoint}/bulk-delete`, { ids }),
+      });
+      if (!result.executed) return;
       toast.success(`${ids.length} data dihapus`);
       load();
     } catch (e) {
