@@ -42,6 +42,12 @@ import {
   executeAuthorizedMutation,
   resolveCrudResource,
 } from "@/components/admin/crudAuthorization";
+import {
+  canWriteCrudRow,
+  getInitialBranchValue,
+  getScopedBranchOptions,
+  usesCrudBranchScope,
+} from "@/components/admin/crudBranchScope";
 
 export default function CrudPage({
   title,
@@ -56,9 +62,11 @@ export default function CrudPage({
   extraOptions = {},
   lookups = [],
 }) {
-  const { canWriteResource } = useAuth();
+  const { user, canWriteResource, getWriteScope } = useAuth();
   const resource = resolveCrudResource(endpoint);
   const canWrite = canWriteResource(resource);
+  const writeScope = getWriteScope(resource);
+  const assignedBranchId = user?.cabang_id;
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [options, setOptions] = useState(extraOptions);
@@ -158,6 +166,15 @@ export default function CrudPage({
   const openCreate = () => {
     const init = {};
     fields.forEach((f) => {
+      const branchValue = getInitialBranchValue({
+        resource,
+        fieldKey: f.key,
+        writeScope,
+        assignedBranchId,
+      });
+      if (branchValue !== undefined) {
+        init[f.key] = branchValue;
+      } else
       if (f.type === "map") {
         init[f.latKey || "lat"] = "";
         init[f.lngKey || "lng"] = "";
@@ -170,6 +187,14 @@ export default function CrudPage({
     setEditing(null);
     setOpen(true);
   };
+
+  const canWriteRow = (row) =>
+    canWriteCrudRow({
+      resource,
+      row,
+      writeScope,
+      assignedBranchId,
+    });
 
   const openEdit = (row) => {
     const init = {};
@@ -192,7 +217,8 @@ export default function CrudPage({
   };
 
   const save = async () => {
-    if (!canWrite) {
+    const allowed = canWrite && (!editing || canWriteRow(editing));
+    if (!allowed) {
       toast.error("Anda tidak memiliki izin untuk mengubah data ini.");
       return;
     }
@@ -205,6 +231,13 @@ export default function CrudPage({
     setSaving(true);
     const payload = { ...form };
     fields.forEach((f) => {
+      const branchValue = getInitialBranchValue({
+        resource,
+        fieldKey: f.key,
+        writeScope,
+        assignedBranchId,
+      });
+      if (branchValue !== undefined) payload[f.key] = branchValue;
       if (f.type === "number") payload[f.key] = Number(payload[f.key] || 0);
       if (f.type === "dynamic_list")
         payload[f.key] = (form[f.key] || [])
@@ -213,7 +246,7 @@ export default function CrudPage({
     });
     try {
       const result = await executeAuthorizedMutation({
-        allowed: canWrite,
+        allowed,
         onDenied: () =>
           toast.error("Anda tidak memiliki izin untuk mengubah data ini."),
         mutation: () =>
@@ -239,7 +272,7 @@ export default function CrudPage({
   const doDelete = async () => {
     try {
       const result = await executeAuthorizedMutation({
-        allowed: canWrite,
+        allowed: canWriteRow(deleteTarget),
         onDenied: () =>
           toast.error("Anda tidak memiliki izin untuk menghapus data ini."),
         mutation: () => api.delete(`/${endpoint}/${deleteTarget.id}`),
@@ -254,9 +287,13 @@ export default function CrudPage({
   };
 
   const bulkDelete = async (ids) => {
+    const selectedRows = ids.map((id) => rows.find((row) => row.id === id));
+    const allowed =
+      ids.length > 0 &&
+      selectedRows.every((row) => row && canWriteRow(row));
     try {
       const result = await executeAuthorizedMutation({
-        allowed: canWrite,
+        allowed,
         onDenied: () =>
           toast.error("Anda tidak memiliki izin untuk menghapus data ini."),
         mutation: () => api.post(`/${endpoint}/bulk-delete`, { ids }),
@@ -358,6 +395,7 @@ export default function CrudPage({
         onBulkDelete={bulkDelete}
         onExport={exportEntity ? () => setExportDialogOpen(true) : null}
         canWrite={canWrite}
+        canWriteRow={usesCrudBranchScope(resource) ? canWriteRow : undefined}
         testidPrefix={endpoint}
       />
 
@@ -373,7 +411,13 @@ export default function CrudPage({
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
             {fields.map((f) => {
-              const opts = f.options || options[f.key] || [];
+              const opts = getScopedBranchOptions({
+                resource,
+                fieldKey: f.key,
+                options: f.options || options[f.key] || [],
+                writeScope,
+                assignedBranchId,
+              });
               const isFoto = f.key === "foto" || f.type === "file";
 
               return (
@@ -504,7 +548,7 @@ export default function CrudPage({
                     </div>
                   ) : f.type === "checkbox_group" ? (
                     <div className="flex flex-wrap gap-2">
-                      {(f.options || options[f.key] || []).map((o) => {
+                      {opts.map((o) => {
                         const val = typeof o === "string" ? o : o.value;
                         const lab = typeof o === "string" ? o : o.label;
                         const active = (form[f.key] || []).includes(val);

@@ -18,7 +18,7 @@ const PAGE_SIZE = 8;
 
 export default function DataTable({
   columns, rows, loading, searchKeys = [], filters = [],
-  onEdit, onDelete, onBulkDelete, onExport, canWrite = true,
+  onEdit, onDelete, onBulkDelete, onExport, canWrite = true, canWriteRow,
   selectable = true, testidPrefix = "table",
 }) {
   const [q, setQ] = useState("");
@@ -55,11 +55,12 @@ export default function DataTable({
   const toggleSort = (key) =>
     setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }));
 
-  const allChecked = pageRows.length > 0 && pageRows.every((r) => selected.includes(r.id));
+  const writablePageRows = canWriteRow ? pageRows.filter(canWriteRow) : pageRows;
+  const allChecked = writablePageRows.length > 0 && writablePageRows.every((r) => selected.includes(r.id));
   const toggleAll = () =>
     setSelected(allChecked
-      ? selected.filter((id) => !pageRows.some((r) => r.id === id))
-      : [...new Set([...selected, ...pageRows.map((r) => r.id)])]);
+      ? selected.filter((id) => !writablePageRows.some((r) => r.id === id))
+      : [...new Set([...selected, ...writablePageRows.map((r) => r.id)])]);
 
   return (
     <div className="space-y-4">
@@ -125,8 +126,10 @@ export default function DataTable({
               <TableRow className="bg-secondary/60 hover:bg-secondary/60">
                 {selectable && (
                   <TableHead className="w-10 sticky top-0">
-                    <Checkbox checked={allChecked} onCheckedChange={toggleAll}
-                      data-testid={`${testidPrefix}-check-all`} />
+                    {(!canWriteRow || writablePageRows.length > 0) && (
+                      <Checkbox checked={allChecked} onCheckedChange={toggleAll}
+                        data-testid={`${testidPrefix}-check-all`} />
+                    )}
                   </TableHead>
                 )}
                 {columns.map((c) => (
@@ -169,9 +172,11 @@ export default function DataTable({
                   <TableRow key={r.id} data-testid={`${testidPrefix}-row`}>
                     {selectable && (
                       <TableCell>
-                        <Checkbox checked={selected.includes(r.id)}
-                          onCheckedChange={() =>
-                            setSelected((s) => s.includes(r.id) ? s.filter((x) => x !== r.id) : [...s, r.id])} />
+                        {(!canWriteRow || canWriteRow(r)) && (
+                          <Checkbox checked={selected.includes(r.id)}
+                            onCheckedChange={() =>
+                              setSelected((s) => s.includes(r.id) ? s.filter((x) => x !== r.id) : [...s, r.id])} />
+                        )}
                       </TableCell>
                     )}
                     {columns.map((c) => (
@@ -181,13 +186,13 @@ export default function DataTable({
                     ))}
                     {(onEdit || onDelete) && (
                       <TableCell className="text-right whitespace-nowrap">
-                        {onEdit && canWrite && (
+                        {onEdit && canWrite && (!canWriteRow || canWriteRow(r)) && (
                           <Button variant="ghost" size="icon" className="h-8 w-8"
                             onClick={() => onEdit(r)} data-testid={`${testidPrefix}-edit`}>
                             <Pencil className="h-4 w-4 text-emerald-brand" />
                           </Button>
                         )}
-                        {onDelete && canWrite && (
+                        {onDelete && canWrite && (!canWriteRow || canWriteRow(r)) && (
                           <Button variant="ghost" size="icon" className="h-8 w-8"
                             onClick={() => onDelete(r)} data-testid={`${testidPrefix}-delete`}>
                             <Trash2 className="h-4 w-4 text-destructive" />
