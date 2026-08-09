@@ -1,5 +1,20 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import api from "@/lib/api";
+import {
+  canReadGlobally as roleCanReadGlobally,
+  canViewResource as roleCanViewResource,
+  canWrite as roleCanWrite,
+  canWriteResource as roleCanWriteResource,
+  getReadScope as roleGetReadScope,
+  getWriteScope as roleGetWriteScope,
+  isAdminCabang as roleIsAdminCabang,
+  isBranchScoped as roleIsBranchScoped,
+  isGlobalReadonly as roleIsGlobalReadonly,
+  isKetuaYayasan as roleIsKetuaYayasan,
+  isPenerusIlmu as roleIsPenerusIlmu,
+  isSuperAdmin as roleIsSuperAdmin,
+  isViewerRole,
+} from "@/lib/permissions";
 
 const AuthContext = createContext(null);
 
@@ -38,10 +53,23 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
-  const isReadOnly =
-    user && ["viewer", "penerus_ilmu", "ketua_yayasan"].includes(user.role);
+  const role = user && user.role;
+  const isReadOnly = Boolean(isViewerRole(role) || roleIsGlobalReadonly(role));
+  // Backward-compatible alias: existing components use isViewer as read-only.
   const isViewer = isReadOnly;
-  const isSuper = user && user.role === "super_admin";
+  const isSuper = roleIsSuperAdmin(role);
+  const isAdminCabang = roleIsAdminCabang(role);
+  const isViewerRoleOnly = isViewerRole(role);
+  const isPenerusIlmu = roleIsPenerusIlmu(role);
+  const isKetuaYayasan = roleIsKetuaYayasan(role);
+  const isGlobalReadonly = roleIsGlobalReadonly(role);
+  const isBranchScoped = roleIsBranchScoped(role);
+  const canViewResource = (resource) => roleCanViewResource(role, resource);
+  const canReadGlobally = (resource) => roleCanReadGlobally(role, resource);
+  const canWrite = (resource) => roleCanWrite(role, resource);
+  const canWriteResource = (resource) => roleCanWriteResource(role, resource);
+  const getReadScope = (resource) => roleGetReadScope(role, resource);
+  const getWriteScope = (resource) => roleGetWriteScope(role, resource);
 
   return (
     <AuthContext.Provider
@@ -54,6 +82,18 @@ export function AuthProvider({ children }) {
         isReadOnly,
         isViewer,
         isSuper,
+        isAdminCabang,
+        isViewerRole: isViewerRoleOnly,
+        isPenerusIlmu,
+        isKetuaYayasan,
+        isGlobalReadonly,
+        isBranchScoped,
+        canViewResource,
+        canReadGlobally,
+        canWrite,
+        canWriteResource,
+        getReadScope,
+        getWriteScope,
       }}
     >
       {children}

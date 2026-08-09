@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { ROLE_LABELS } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +54,6 @@ const NAV = [
         to: "/admin/users",
         label: "Manajemen User",
         icon: ShieldCheck,
-        super: true,
       },
     ],
   },
@@ -66,7 +66,6 @@ const NAV = [
         to: "/admin/pesan",
         label: "Pesan Masuk",
         icon: MessageSquare,
-        super: true,
       },
     ],
   },
@@ -78,29 +77,35 @@ const NAV = [
         to: "/admin/audit",
         label: "Audit Log",
         icon: ScrollText,
-        super: true,
       },
       {
         to: "/admin/pengaturan",
         label: "Pengaturan",
         icon: Settings,
-        super: true,
       },
       { to: "/admin/profil", label: "Profil Admin", icon: User },
     ],
   },
 ];
 
-const ROLE_LABEL = {
-  super_admin: "Super Admin",
-  admin_cabang: "Admin Cabang",
-  viewer: "Viewer",
-  penerus_ilmu: "Penerus Ilmu",
-  ketua_yayasan: "Ketua Yayasan",
-};
+const NAV_RESOURCE = Object.freeze({
+  "/admin/dashboard": "dashboard",
+  "/admin/cabang": "cabang",
+  "/admin/guru": "guru",
+  "/admin/jamaah": "jamaah",
+  "/admin/pengurus": "pengurus",
+  "/admin/users": "users",
+  "/admin/agenda": "agenda",
+  "/admin/galeri": "galeri",
+  "/admin/pesan": "messages",
+  "/admin/laporan": "export",
+  "/admin/audit": "audit_logs",
+  "/admin/pengaturan": "settings",
+  "/admin/profil": "profile",
+});
 
 export default function AdminLayout() {
-  const { user, logout, isSuper } = useAuth();
+  const { user, logout, canViewResource } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -140,7 +145,7 @@ export default function AdminLayout() {
             </p>
             <div className="space-y-0.5">
               {grp.items
-                .filter((i) => !i.super || isSuper)
+                .filter((item) => canViewResource(NAV_RESOURCE[item.to]))
                 .map((item) => (
                   <NavLink
                     key={item.to}
@@ -175,7 +180,7 @@ export default function AdminLayout() {
               {user?.name || user?.username}
             </p>
             <Badge className="bg-white/10 text-white/80 hover:bg-white/10 text-[10px] px-1.5 py-0 h-4">
-              {ROLE_LABEL[user?.role]}
+              {ROLE_LABELS[user?.role] || "Role Tidak Dikenal"}
             </Badge>
           </div>
         </div>
