@@ -138,6 +138,10 @@ logger.info("Allowed Origins: %s", ALLOWED_ORIGINS)
 
 app = FastAPI(title="Yayasan Raudhatul Jannah API")
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 app.mount(
     "/uploads",
     StaticFiles(
