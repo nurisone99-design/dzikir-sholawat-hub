@@ -27,9 +27,21 @@ from seed import demo_seed_enabled, seed_all
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://dzikir-sholawat-hub.preview.emergentagent.com').rstrip('/')
 API = f"{BASE_URL}/api"
 
-SUPER = {"email": "admin@raudhatuljannah.id", "password": "Admin@2026"}
-CABANG_USER = {"email": "cabang@raudhatuljannah.id", "password": "Cabang@2026"}
-VIEWER = {"email": "viewer@raudhatuljannah.id", "password": "Viewer@2026"}
+def _env_cred(env_name, email):
+    password = os.environ.get(env_name)
+    if not password:
+        return None
+    return {"email": email, "password": password}
+
+
+SUPER = _env_cred("SEED_DEMO_ADMIN_PASSWORD", "admin@raudhatuljannah.id")
+CABANG_USER = _env_cred("SEED_DEMO_CABANG_PASSWORD", "cabang@raudhatuljannah.id")
+VIEWER = _env_cred("SEED_DEMO_VIEWER_PASSWORD", "viewer@raudhatuljannah.id")
+
+pytestmark = pytest.mark.skipif(
+    SUPER is None or CABANG_USER is None or VIEWER is None,
+    reason="Demo seed credentials (SEED_DEMO_*_PASSWORD) not configured",
+)
 
 
 # ---------- fixtures ----------
@@ -212,7 +224,7 @@ class TestAuth:
 
     def test_login_by_username(self):
         r = requests.post(f"{API}/auth/login",
-                          json={"email": "superadmin", "password": "Admin@2026"}, timeout=15)
+                          json={"email": "admin", "password": SUPER["password"]}, timeout=15)
         assert r.status_code == 200
 
     def test_login_wrong_password(self):

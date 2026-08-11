@@ -133,17 +133,6 @@ export default function Login() {
               {loading ? "Memproses..." : "Masuk"}
             </Button>
           </form>
-
-          <div className="mt-8 rounded-xl bg-secondary/60 p-4 text-sm">
-            <p className="font-semibold text-charcoal mb-1">Akun Demo</p>
-            <p className="text-muted-foreground">
-              Super Admin: admin@raudhatuljannah.id / Admin@2026
-              <br />
-              Admin Cabang: cabang@raudhatuljannah.id / Cabang@2026
-              <br />
-              Viewer: viewer@raudhatuljannah.id / Viewer@2026
-            </p>
-          </div>
         </motion.div>
       </div>
     </div>

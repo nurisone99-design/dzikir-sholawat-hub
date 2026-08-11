@@ -1,6 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 import certifi
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 """Seed sample data for Yayasan Raudhatul Jannah portal (idempotent)."""
 
@@ -94,15 +98,55 @@ def demo_seed_enabled() -> bool:
     return os.getenv("SEED_DEMO_DATA", "false").strip().lower() == "true"
 
 
+def demo_seed_credentials():
+    """Return demo user definitions with passwords sourced from env vars.
+
+    Returns None when any required credential is missing or too short so that
+    callers can fail closed instead of provisioning accounts with known
+    passwords.
+    """
+    spec = [
+        ("SEED_DEMO_ADMIN_PASSWORD", "admin", "admin@raudhatuljannah.id", "super_admin", "Super admin"),
+        ("SEED_DEMO_CABANG_PASSWORD", "admincabang", "cabang@raudhatuljannah.id", "admin_cabang", "Admin Cabang Jakarta"),
+        ("SEED_DEMO_VIEWER_PASSWORD", "viewer", "viewer@raudhatuljannah.id", "viewer", "Pengamat Data"),
+    ]
+    users = []
+    for env_name, username, email, role, name in spec:
+        password = os.getenv(env_name)
+        if not password or len(password) < 8:
+            logger.warning(
+                "Demo seed credentials not fully configured: %s is missing or shorter than 8 characters",
+                env_name,
+            )
+            return None
+        users.append({
+            "username": username,
+            "email": email,
+            "password": password,
+            "role": role,
+            "name": name,
+        })
+    return users
+
+
 async def seed_all(db, hash_password, now_iso):
     if not demo_seed_enabled():
+        return False
+
+    demo_users = demo_seed_credentials()
+    if demo_users is None:
+        logger.warning(
+            "SEED_DEMO_DATA=true but demo seed credentials are not configured; "
+            "set SEED_DEMO_ADMIN_PASSWORD, SEED_DEMO_CABANG_PASSWORD and "
+            "SEED_DEMO_VIEWER_PASSWORD to enable the demo seed. Skipping demo seed."
+        )
         return False
 
     if await db.cabang.count_documents({}) > 0:
         # ensure settings + test users exist even on reseed
         if not await db.settings.find_one({"key": "yayasan"}):
             await db.settings.insert_one({**SETTINGS, "created_at": now_iso()})
-        await _seed_test_users(db, hash_password, now_iso)
+        await _seed_test_users(db, hash_password, now_iso, demo_users)
         return True
 
     # Cabang
@@ -158,19 +202,11 @@ async def seed_all(db, hash_password, now_iso):
     # Settings
     await db.settings.insert_one({**SETTINGS, "created_at": now_iso()})
 
-    await _seed_test_users(db, hash_password, now_iso)
+    await _seed_test_users(db, hash_password, now_iso, demo_users)
     return True
 
 
-async def _seed_test_users(db, hash_password, now_iso):
-    users = [
-        {"username": "admin", "email": "admin@raudhatuljannah.id", "password": "Admin@2026",
-         "role": "super_admin", "name": "Super admin"},
-        {"username": "admincabang", "email": "cabang@raudhatuljannah.id", "password": "Cabang@2026",
-         "role": "admin_cabang", "name": "Admin Cabang Jakarta"},
-        {"username": "viewer", "email": "viewer@raudhatuljannah.id", "password": "Viewer@2026",
-         "role": "viewer", "name": "Pengamat Data"},
-    ]
+async def _seed_test_users(db, hash_password, now_iso, users):
     for u in users:
         if not await db.users.find_one({"email": u["email"]}):
             await db.users.insert_one({
@@ -182,7 +218,6 @@ async def _seed_test_users(db, hash_password, now_iso):
 # BLOK EKSEKUSI UTAMA (Jalankan via Terminal)
 # ==========================================
 import asyncio
-import os
 import bcrypt
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient

@@ -1480,12 +1480,11 @@ async def startup():
         })
         logger.info("Seeded super admin")
 
-    from seed import demo_seed_enabled, seed_all
-    if demo_seed_enabled():
-        await seed_all(db, hash_password, now_iso)
+    from seed import seed_all
+    if await seed_all(db, hash_password, now_iso):
         logger.info("Demo seed enabled and applied")
     else:
-        logger.info("Demo seed disabled")
+        logger.info("Demo seed disabled or skipped (credentials not configured)")
 
 @app.on_event("shutdown")
 async def shutdown():

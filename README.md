@@ -191,8 +191,13 @@ ALLOWED_ORIGINS=http://localhost:3000
 # Opsional: host HTTP yang diizinkan, pisahkan dengan koma
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Opsional: isi true hanya untuk membuat data demo dan akun test pada development
+# Opsional: isi true hanya untuk membuat data demo pada development
 # Default: false. Jangan aktifkan pada production.
+# Saat aktif, password akun demo WAJIB diisi lewat variabel berikut
+# (minimal 8 karakter); tanpa ketiganya seed demo tidak dijalankan:
+#   SEED_DEMO_ADMIN_PASSWORD  -> akun Super Admin (admin@raudhatuljannah.id)
+#   SEED_DEMO_CABANG_PASSWORD -> akun Admin Cabang (cabang@raudhatuljannah.id)
+#   SEED_DEMO_VIEWER_PASSWORD -> akun Viewer (viewer@raudhatuljannah.id)
 SEED_DEMO_DATA=false
 ```
 
@@ -205,7 +210,10 @@ SEED_DEMO_DATA=false
 | `ADMIN_PASSWORD` | Ya | Password super admin bootstrap. |
 | `ALLOWED_ORIGINS` | Tidak | Daftar origin CORS; default `http://localhost:3000`. |
 | `ALLOWED_HOSTS` | Tidak | Daftar host untuk Trusted Host middleware; default `localhost,127.0.0.1`. |
-| `SEED_DEMO_DATA` | Tidak | Aktifkan hanya dengan nilai `true` untuk menjalankan seed data demo dan akun test. Default `false`; production tidak menjalankan seed otomatis. |
+| `SEED_DEMO_DATA` | Tidak | Aktifkan hanya dengan nilai `true` untuk menjalankan seed data demo. Default `false`; production tidak menjalankan seed otomatis. Tanpa password demo di bawah, seed tidak dijalankan (fail-closed). |
+| `SEED_DEMO_ADMIN_PASSWORD` | Tidak* | Password akun demo Super Admin. Diperlukan (min. 8 karakter) hanya jika `SEED_DEMO_DATA=true`. |
+| `SEED_DEMO_CABANG_PASSWORD` | Tidak* | Password akun demo Admin Cabang. Diperlukan (min. 8 karakter) hanya jika `SEED_DEMO_DATA=true`. |
+| `SEED_DEMO_VIEWER_PASSWORD` | Tidak* | Password akun demo Viewer. Diperlukan (min. 8 karakter) hanya jika `SEED_DEMO_DATA=true`. |
 
 ### Frontend: `frontend/.env`
 
