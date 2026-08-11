@@ -20,9 +20,9 @@ export const WRITE_SCOPE = Object.freeze({ GLOBAL: "global", BRANCH: "branch", N
 const OFFICIAL_ROLES = new Set(Object.values(ROLES));
 const GLOBAL_READONLY_ROLES = new Set([ROLES.PENERUS_ILMU, ROLES.KETUA_YAYASAN]);
 const BRANCH_SCOPED_ROLES = new Set([ROLES.ADMIN_CABANG, ROLES.VIEWER]);
-const GLOBAL_READ_RESOURCES = new Set(["agenda", "galeri"]);
+const GLOBAL_READ_RESOURCES = new Set(["agenda", "galeri", "pengumuman"]);
 const BRANCH_READ_RESOURCES = new Set([
-  "jamaah", "guru", "pengurus", "cabang", "pengumuman", "dashboard",
+  "jamaah", "guru", "pengurus", "cabang", "dashboard",
 ]);
 const BRANCH_WRITE_RESOURCES = new Set([
   "jamaah", "guru", "pengurus", "agenda", "galeri", "pengumuman",

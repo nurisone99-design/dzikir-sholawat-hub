@@ -372,70 +372,64 @@ async def delete_user(uid: str, user: dict = Depends(get_current_user)):
     await log_action(user, "DELETE", "users", f"Hapus user {uid}")
     return {"message": "User dihapus"}
 
-# ------------------------------------------------------------------ generic CRUD factory
-def make_crud(name: str, collection: str):
-    @api_router.get(f"/{name}")
-    async def _list(user: dict = Depends(get_current_user)):
-        docs = await db[collection].find().sort("created_at", -1).to_list(5000)
-        return [serialize(d) for d in docs]
+# ---------------------------------------------------------------- cabang CRUD (branch-scoped)
+# Cabang adalah entitas global yang hanya boleh dikelola super_admin.
+# Role branch-scoped (admin_cabang/viewer) hanya dapat membaca cabang miliknya sendiri.
+def cabang_scope_filter(scope: Optional[Dict[str, str]]) -> dict:
+    if scope is None:
+        return {}
+    return {"_id": ObjectId(scope["cabang_id"])}
 
-    @api_router.get(f"/{name}/{{item_id}}")
-    async def _get(item_id: str, user: dict = Depends(get_current_user)):
-        doc = await db[collection].find_one({"_id": ObjectId(item_id)})
-        if not doc:
-            raise HTTPException(status_code=404, detail="Data tidak ditemukan")
-        return serialize(doc)
+@api_router.get("/cabang")
+async def list_cabang(user: dict = Depends(get_current_user)):
+    scope = await valid_branch_scope(user)
+    docs = await db["cabang"].find(cabang_scope_filter(scope)).sort("created_at", -1).to_list(5000)
+    return [serialize(d) for d in docs]
 
-    @api_router.post(f"/{name}")
-    async def _create(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
-        require_write(user)
-        payload.pop("id", None)
-        payload["created_at"] = now_iso()
-        payload["updated_at"] = now_iso()
-        # Generate ID otomatis
-        if collection == "jamaah":
-            last = await db[collection].find_one(
-                {"id_jamaah": {"$exists": True}},
-                sort=[("id_jamaah", -1)]
-            )
+@api_router.get("/cabang/{item_id}")
+async def get_cabang(item_id: str, user: dict = Depends(get_current_user)):
+    scope = await valid_branch_scope(user)
+    if scope is not None and item_id != scope["cabang_id"]:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    doc = await db["cabang"].find_one({"_id": ObjectId(item_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    return serialize(doc)
 
-            if last and last.get("id_jamaah"):
-                nomor = int(last["id_jamaah"].split("-")[1]) + 1
-            else:
-                nomor = 1
+@api_router.post("/cabang")
+async def create_cabang(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_super(user)
+    payload.pop("id", None)
+    payload["created_at"] = now_iso()
+    payload["updated_at"] = now_iso()
+    res = await db["cabang"].insert_one(payload)
+    await log_action(user, "CREATE", "cabang", payload.get("nama") or payload.get("kota") or "")
+    return serialize(await db["cabang"].find_one({"_id": res.inserted_id}))
 
-            payload["id_jamaah"] = f"JMH-{nomor:04d}"
-        res = await db[collection].insert_one(payload)
-        await log_action(user, "CREATE", collection, payload.get("nama") or payload.get("judul") or "")
-        return serialize(await db[collection].find_one({"_id": res.inserted_id}))
+@api_router.put("/cabang/{item_id}")
+async def update_cabang(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_super(user)
+    payload.pop("id", None)
+    payload.pop("_id", None)
+    payload["updated_at"] = now_iso()
+    await db["cabang"].update_one({"_id": ObjectId(item_id)}, {"$set": payload})
+    await log_action(user, "UPDATE", "cabang", item_id)
+    return serialize(await db["cabang"].find_one({"_id": ObjectId(item_id)}))
 
-    @api_router.put(f"/{name}/{{item_id}}")
-    async def _update(item_id: str, payload: Dict[str, Any], user: dict = Depends(get_current_user)):
-        require_write(user)
-        payload.pop("id", None)
-        payload.pop("_id", None)
-        payload["updated_at"] = now_iso()
-        await db[collection].update_one({"_id": ObjectId(item_id)}, {"$set": payload})
-        await log_action(user, "UPDATE", collection, item_id)
-        return serialize(await db[collection].find_one({"_id": ObjectId(item_id)}))
+@api_router.delete("/cabang/{item_id}")
+async def delete_cabang(item_id: str, user: dict = Depends(get_current_user)):
+    require_super(user)
+    await db["cabang"].delete_one({"_id": ObjectId(item_id)})
+    await log_action(user, "DELETE", "cabang", item_id)
+    return {"message": "Data dihapus"}
 
-    @api_router.delete(f"/{name}/{{item_id}}")
-    async def _delete(item_id: str, user: dict = Depends(get_current_user)):
-        require_write(user)
-        await db[collection].delete_one({"_id": ObjectId(item_id)})
-        await log_action(user, "DELETE", collection, item_id)
-        return {"message": "Data dihapus"}
-
-    @api_router.post(f"/{name}/bulk-delete")
-    async def _bulk_delete(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
-        require_write(user)
-        ids = [ObjectId(i) for i in payload.get("ids", [])]
-        await db[collection].delete_many({"_id": {"$in": ids}})
-        await log_action(user, "DELETE", collection, f"Bulk hapus {len(ids)} data")
-        return {"message": f"{len(ids)} data dihapus"}
-
-for _n, _c in [("cabang", "cabang"), ("pengumuman", "pengumuman")]:
-    make_crud(_n, _c)
+@api_router.post("/cabang/bulk-delete")
+async def bulk_delete_cabang(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
+    require_super(user)
+    ids = [ObjectId(i) for i in payload.get("ids", [])]
+    await db["cabang"].delete_many({"_id": {"$in": ids}})
+    await log_action(user, "DELETE", "cabang", f"Bulk hapus {len(ids)} data")
+    return {"message": f"{len(ids)} data dihapus"}
 
 
 # ------------------------------------------------ global read + branch-scoped write CRUD
@@ -535,7 +529,7 @@ def make_global_read_branch_write_crud(name: str, collection: str):
         return {"message": f"{len(ids)} data dihapus"}
 
 
-for _n, _c in [("agenda", "agenda"), ("galeri", "galeri")]:
+for _n, _c in [("agenda", "agenda"), ("galeri", "galeri"), ("pengumuman", "pengumuman")]:
     make_global_read_branch_write_crud(_n, _c)
 
 # ------------------------------------------------------------------ jamaah CRUD with branch scope
