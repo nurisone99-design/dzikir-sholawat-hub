@@ -1014,10 +1014,146 @@ async def update_settings(payload: Dict[str, Any], user: dict = Depends(get_curr
 BACKUP_COLLECTIONS = ["cabang", "guru", "jamaah", "pengurus", "agenda", "galeri",
                       "pengumuman", "settings", "messages"]
 
+BACKUP_FORMAT_VERSION = 1
+RESTORE_META_KEYS = {"format_version", "created_at", "generated_by", "app", "collections"}
+MAX_DOCS_PER_COLLECTION = 100000
+MAX_TOTAL_DOCS = 900000
+RESTORE_INSERT_BATCH = 500
+SNAPSHOT_COLLECTION = "_restore_snapshots"
+SNAPSHOT_CHUNK_SIZE = 500
+
+# Reference fields whose values must be non-empty strings (or lists of them).
+REFERENCE_FIELDS = {
+    "guru": ["cabang_id", "cabang_ids"],
+    "jamaah": ["cabang_id", "guru_id"],
+    "pengurus": ["jamaah_id", "cabang_id"],
+    "agenda": ["cabang_id"],
+}
+
+
+def _valid_reference(value) -> bool:
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, list):
+        return all(isinstance(item, str) and item.strip() != "" for item in value)
+    return False
+
+
+def validate_restore_payload(payload) -> tuple:
+    """Preflight a restore payload without touching the database.
+
+    Returns (True, "") when the payload is safe to apply, otherwise
+    (False, "<safe error message>"). Never reads existing data.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return False, "Payload backup tidak valid."
+
+    format_version = payload.get("format_version")
+    if format_version is None:
+        return False, (
+            "Backup tidak memiliki format_version. Format lama tidak dapat "
+            "diverifikasi keamanannya; buat ulang backup lalu coba lagi."
+        )
+    if not isinstance(format_version, int) or format_version != BACKUP_FORMAT_VERSION:
+        return False, "Versi format backup tidak dikenal."
+
+    allowed_keys = set(BACKUP_COLLECTIONS) | RESTORE_META_KEYS
+    unknown = sorted(set(payload) - allowed_keys)
+    if unknown:
+        return False, f"Format backup mengandung koleksi asing: {', '.join(unknown)}."
+
+    total_docs = 0
+    for col in BACKUP_COLLECTIONS:
+        if col not in payload:
+            return False, f"Koleksi wajib tidak ada: {col}."
+        rows = payload[col]
+        if not isinstance(rows, list):
+            return False, f"Data koleksi {col} bukan daftar dokumen."
+        if len(rows) > MAX_DOCS_PER_COLLECTION:
+            return False, f"Koleksi {col} melebihi batas {MAX_DOCS_PER_COLLECTION} dokumen."
+        total_docs += len(rows)
+        if total_docs > MAX_TOTAL_DOCS:
+            return False, f"Total dokumen melebihi batas {MAX_TOTAL_DOCS}."
+
+        ref_fields = REFERENCE_FIELDS.get(col, ())
+        for idx, row in enumerate(rows):
+            if not isinstance(row, dict) or not row:
+                return False, f"Dokumen {col}[{idx}] tidak valid."
+            for field in ref_fields:
+                if field in row and not _valid_reference(row[field]):
+                    return False, f"Referensi tidak valid: {col}[{idx}].{field}."
+
+    return True, ""
+
+
+async def _snapshot_existing_data(user_id: str) -> str:
+    """Snapshot all backup collections into bounded-size chunk documents.
+
+    Streams each collection cursor and inserts chunks of SNAPSHOT_CHUNK_SIZE
+    documents so memory stays bounded. Raises on failure (fail closed).
+    """
+    snapshot_id = str(uuid.uuid4())
+    now = now_iso()
+    await db[SNAPSHOT_COLLECTION].insert_one({
+        "snapshot_id": snapshot_id,
+        "kind": "restore_snapshot",
+        "collections": list(BACKUP_COLLECTIONS),
+        "user_id": user_id,
+        "created_at": now,
+        "status": "active",
+    })
+
+    for col in BACKUP_COLLECTIONS:
+        batch = []
+        chunk_index = 0
+        async for doc in db[col].find():
+            batch.append(doc)
+            if len(batch) >= SNAPSHOT_CHUNK_SIZE:
+                await db[SNAPSHOT_COLLECTION].insert_one({
+                    "snapshot_id": snapshot_id,
+                    "collection": col,
+                    "chunk_index": chunk_index,
+                    "docs": batch,
+                })
+                chunk_index += 1
+                batch = []
+        if batch:
+            await db[SNAPSHOT_COLLECTION].insert_one({
+                "snapshot_id": snapshot_id,
+                "collection": col,
+                "chunk_index": chunk_index,
+                "docs": batch,
+            })
+    return snapshot_id
+
+
+async def _rollback_snapshot(snapshot_id: str) -> None:
+    """Restore collections from the snapshot chunks (bounded memory)."""
+    for col in BACKUP_COLLECTIONS:
+        await db[col].delete_many({})
+        cursor = (
+            db[SNAPSHOT_COLLECTION]
+            .find({"snapshot_id": snapshot_id, "collection": col})
+            .sort("chunk_index", 1)
+        )
+        async for chunk in cursor:
+            docs = chunk.get("docs") or []
+            if docs:
+                await db[col].insert_many(docs)
+
+
+async def _drop_snapshot(snapshot_id: str) -> None:
+    await db[SNAPSHOT_COLLECTION].delete_many({"snapshot_id": snapshot_id})
+
+
 @api_router.get("/backup")
 async def backup(user: dict = Depends(get_current_user)):
     require_super(user)
-    dump = {}
+    dump = {
+        "format_version": BACKUP_FORMAT_VERSION,
+        "created_at": now_iso(),
+        "generated_by": "raudhatuljannah-backup",
+    }
     for col in BACKUP_COLLECTIONS:
         docs = await db[col].find().to_list(100000)
         dump[col] = [serialize(d) for d in docs]
@@ -1027,16 +1163,59 @@ async def backup(user: dict = Depends(get_current_user)):
 @api_router.post("/restore")
 async def restore(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
     require_super(user)
-    for col in BACKUP_COLLECTIONS:
-        if col in payload:
-            await db[col].delete_many({})
+
+    valid, error = validate_restore_payload(payload)
+    if not valid:
+        await log_action(user, "RESTORE", "restore", error)
+        raise HTTPException(status_code=400, detail=error)
+
+    snapshot_id = None
+    try:
+        snapshot_id = await _snapshot_existing_data(user.get("id"))
+    except Exception:
+        logger.exception("Restore: gagal membuat snapshot; restore dibatalkan")
+        raise HTTPException(
+            status_code=500, detail="Gagal membuat snapshot; restore dibatalkan."
+        )
+
+    succeeded = False
+    rolled_back = False
+    try:
+        for col in BACKUP_COLLECTIONS:
             rows = []
             for r in payload[col]:
-                r.pop("id", None)
-                r.pop("_id", None)
-                rows.append(r)
-            if rows:
-                await db[col].insert_many(rows)
+                clean = dict(r)
+                clean.pop("id", None)
+                clean.pop("_id", None)
+                rows.append(clean)
+            await db[col].delete_many({})
+            for i in range(0, len(rows), RESTORE_INSERT_BATCH):
+                await db[col].insert_many(rows[i:i + RESTORE_INSERT_BATCH])
+        succeeded = True
+    except Exception:
+        logger.exception("Restore: kegagalan saat menerapkan data; mencoba rollback")
+        try:
+            await _rollback_snapshot(snapshot_id)
+            rolled_back = True
+        except Exception:
+            logger.exception("Restore: rollback juga gagal; snapshot dipertahankan")
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Restore gagal dan rollback tidak dapat dijalankan. "
+                    f"Snapshot tersimpan dengan id {snapshot_id}; hubungi administrator."
+                ),
+            )
+        raise HTTPException(
+            status_code=500, detail="Restore gagal; data dikembalikan ke kondisi sebelumnya."
+        )
+    finally:
+        if succeeded or rolled_back:
+            try:
+                await _drop_snapshot(snapshot_id)
+            except Exception:
+                logger.exception("Restore: gagal membersihkan snapshot %s", snapshot_id)
+
     await log_action(user, "UPDATE", "restore", "Restore database")
     return {"message": "Database berhasil dipulihkan"}
 
