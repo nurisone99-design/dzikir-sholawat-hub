@@ -8,7 +8,8 @@ from fastapi import HTTPException
 import server
 
 
-GLOBAL_READONLY_ROLES = ("penerus_ilmu", "ketua_yayasan")
+GLOBAL_READONLY_ROLES = ("penerus_ilmu", "ketua_yayasan", "viewer_1")
+VIEWER_2_BRANCH = "64c00000000000000000000a"
 
 
 def run(coro):
@@ -17,6 +18,10 @@ def run(coro):
 
 def actor(role):
     return {"id": f"{role}-id", "role": role}
+
+
+def viewer2_actor():
+    return {"id": "viewer_2-id", "role": "viewer_2", "cabang_id": VIEWER_2_BRANCH}
 
 
 class FakeCursor:
@@ -40,6 +45,13 @@ class FakeCollection:
         self.find_queries.append(query or {})
         return FakeCursor(self.documents)
 
+    async def find_one(self, query=None, *_args, **_kwargs):
+        target = (query or {}).get("_id")
+        for doc in self.documents:
+            if target is None or str(doc.get("_id")) == str(target):
+                return doc
+        return None
+
     async def count_documents(self, query):
         self.count_queries.append(query)
         return len(self.documents)
@@ -53,6 +65,17 @@ class FakeMappingDB:
     def __getitem__(self, name):
         assert name == self.collection_name
         return self.collection
+
+
+class FakeBranchDB:
+    """Supports both db.cabang (valid_branch_scope) and db['cabang'] (list_cabang)."""
+
+    def __init__(self, collection):
+        self.cabang = collection
+
+    def __getitem__(self, name):
+        assert name == "cabang"
+        return self.cabang
 
 
 def route_endpoint(path, method="GET"):
@@ -231,5 +254,127 @@ class TestGlobalReadonlyWriteDenials:
 
         with pytest.raises(HTTPException) as exc:
             run(function(*args, actor(role)))
+
+        assert exc.value.status_code == 403
+
+
+class TestViewer2BranchScope:
+    @pytest.mark.parametrize(
+        ("collection_name", "list_function"),
+        [
+            ("jamaah", server.list_jamaah),
+            ("pengurus", server.list_pengurus),
+        ],
+    )
+    def test_jamaah_and_pengurus_lists_are_branch_scoped(
+        self, monkeypatch, collection_name, list_function
+    ):
+        documents = operational_documents()
+        collection = FakeCollection(documents)
+        monkeypatch.setattr(server, "db", SimpleNamespace(**{collection_name: collection}))
+
+        run(list_function(viewer2_actor()))
+
+        assert collection.find_queries == [{"cabang_id": VIEWER_2_BRANCH}]
+
+    def test_cabang_list_is_branch_scoped(self, monkeypatch):
+        branch_documents = [
+            {"_id": ObjectId(VIEWER_2_BRANCH), "nama": "BRANCH_A", "kota": "A"},
+        ]
+        collection = FakeCollection(branch_documents)
+        monkeypatch.setattr(server, "db", FakeBranchDB(collection))
+
+        result = run(server.list_cabang(viewer2_actor()))
+
+        assert {row["nama"] for row in result} == {"BRANCH_A"}
+        assert collection.find_queries == [
+            {"_id": ObjectId(VIEWER_2_BRANCH)}
+        ]
+
+    def test_guru_list_uses_global_scope(self, monkeypatch):
+        documents = operational_documents()
+        collection = FakeCollection(documents)
+
+        async def passthrough(docs, scope=None):
+            assert scope is None
+            return [server.serialize(doc) for doc in docs]
+
+        monkeypatch.setattr(server, "db", SimpleNamespace(guru=collection))
+        monkeypatch.setattr(server, "_enrich_guru", passthrough)
+
+        result = run(server.list_guru(viewer2_actor()))
+
+        assert {row["nama"] for row in result} == {
+            "BRANCH_A",
+            "BRANCH_B",
+            "LEGACY_GLOBAL",
+        }
+        assert collection.find_queries == [{}]
+
+    def test_dashboard_counts_guru_globally_but_jamaah_by_branch(self, monkeypatch):
+        branch_documents = [
+            {"_id": ObjectId(VIEWER_2_BRANCH), "kota": "A"},
+        ]
+        fake_db = SimpleNamespace(
+            cabang=FakeCollection(branch_documents),
+            jamaah=FakeCollection(operational_documents()),
+            guru=FakeCollection(operational_documents()),
+            pengurus=FakeCollection(operational_documents()),
+            agenda=FakeCollection([{"_id": ObjectId(), "judul": "GLOBAL"}]),
+        )
+        monkeypatch.setattr(server, "db", fake_db)
+
+        result = run(server.dashboard_stats(viewer2_actor()))
+
+        assert fake_db.guru.count_queries[0] == {}
+        assert fake_db.jamaah.count_queries[0] == {"cabang_id": VIEWER_2_BRANCH}
+        assert result["total_guru"] == 3
+        assert {row["kota"] for row in result["per_cabang"]} == {"A"}
+
+    @pytest.mark.parametrize("operation", ["create", "update", "delete", "bulk_delete"])
+    def test_viewer2_writes_are_forbidden_before_database_access(
+        self, monkeypatch, operation
+    ):
+        monkeypatch.setattr(server, "db", object())
+
+        with pytest.raises(HTTPException) as exc:
+            if operation == "create":
+                run(server.create_jamaah({"nama": "BLOCKED"}, viewer2_actor()))
+            elif operation == "update":
+                run(server.update_jamaah("000000000000000000000000", {"nama": "BLOCKED"}, viewer2_actor()))
+            elif operation == "delete":
+                run(server.delete_jamaah("000000000000000000000000", viewer2_actor()))
+            else:
+                run(server.bulk_delete_jamaah({"ids": ["000000000000000000000000"]}, viewer2_actor()))
+
+        assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize(
+        "function,args",
+        [
+            (server.list_users, ()),
+            (server.get_settings, ()),
+            (server.audit_logs, ()),
+            (server.list_messages, ()),
+        ],
+    )
+    def test_sensitive_resources_remain_super_admin_only(
+        self, monkeypatch, function, args
+    ):
+        monkeypatch.setattr(server, "db", object())
+
+        with pytest.raises(HTTPException) as exc:
+            run(function(*args, viewer2_actor()))
+
+        assert exc.value.status_code == 403
+
+    @pytest.mark.parametrize("entity", ["guru", "agenda", "galeri", "pengumuman"])
+    def test_non_whitelisted_export_is_forbidden(self, monkeypatch, entity):
+        monkeypatch.setattr(server, "db", object())
+
+        with pytest.raises(HTTPException) as exc:
+            run(server.export_data(entity, format="xlsx", cabang=None,
+                                   cabang_id=None, gender=None, columns=None,
+                                   fields="nama", user=viewer2_actor()))
 
         assert exc.value.status_code == 403

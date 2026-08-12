@@ -4,6 +4,8 @@ export const ROLES = Object.freeze({
   VIEWER: "viewer",
   PENERUS_ILMU: "penerus_ilmu",
   KETUA_YAYASAN: "ketua_yayasan",
+  VIEWER_1: "viewer_1",
+  VIEWER_2: "viewer_2",
 });
 
 export const ROLE_LABELS = Object.freeze({
@@ -12,14 +14,17 @@ export const ROLE_LABELS = Object.freeze({
   [ROLES.VIEWER]: "Viewer",
   [ROLES.PENERUS_ILMU]: "Penerus Ilmu",
   [ROLES.KETUA_YAYASAN]: "Ketua Yayasan",
+  [ROLES.VIEWER_1]: "Viewer 1",
+  [ROLES.VIEWER_2]: "Viewer 2",
 });
 
 export const READ_SCOPE = Object.freeze({ GLOBAL: "global", BRANCH: "branch", NONE: "none" });
 export const WRITE_SCOPE = Object.freeze({ GLOBAL: "global", BRANCH: "branch", NONE: "none" });
 
 const OFFICIAL_ROLES = new Set(Object.values(ROLES));
-const GLOBAL_READONLY_ROLES = new Set([ROLES.PENERUS_ILMU, ROLES.KETUA_YAYASAN]);
-const BRANCH_SCOPED_ROLES = new Set([ROLES.ADMIN_CABANG, ROLES.VIEWER]);
+const GLOBAL_READONLY_ROLES = new Set([ROLES.PENERUS_ILMU, ROLES.KETUA_YAYASAN, ROLES.VIEWER_1]);
+const BRANCH_SCOPED_ROLES = new Set([ROLES.ADMIN_CABANG, ROLES.VIEWER, ROLES.VIEWER_2]);
+const GLOBAL_GURU_ROLES = new Set([ROLES.VIEWER_2]);
 const GLOBAL_READ_RESOURCES = new Set(["agenda", "galeri", "pengumuman"]);
 const BRANCH_READ_RESOURCES = new Set([
   "jamaah", "guru", "pengurus", "cabang", "dashboard",
@@ -40,6 +45,9 @@ export const isPenerusIlmu = (role) => role === ROLES.PENERUS_ILMU;
 export const isKetuaYayasan = (role) => role === ROLES.KETUA_YAYASAN;
 export const isGlobalReadonly = (role) => GLOBAL_READONLY_ROLES.has(role);
 export const isBranchScoped = (role) => BRANCH_SCOPED_ROLES.has(role);
+export const isGlobalGuruRole = (role) => GLOBAL_GURU_ROLES.has(role);
+export const isReadOnlyRole = (role) =>
+  isViewerRole(role) || isGlobalReadonly(role) || isGlobalGuruRole(role);
 
 export function canViewResource(role, resource) {
   if (!isOfficialRole(role)) return false;
@@ -50,6 +58,7 @@ export function canViewResource(role, resource) {
 export function getReadScope(role, resource) {
   if (!canViewResource(role, resource)) return READ_SCOPE.NONE;
   if (isSuperAdmin(role) || isGlobalReadonly(role)) return READ_SCOPE.GLOBAL;
+  if (isGlobalGuruRole(role) && resource === "guru") return READ_SCOPE.GLOBAL;
   if (GLOBAL_READ_RESOURCES.has(resource)) return READ_SCOPE.GLOBAL;
   if (isBranchScoped(role) && BRANCH_READ_RESOURCES.has(resource)) return READ_SCOPE.BRANCH;
   if (resource === "export" || resource === "profile") {
@@ -72,6 +81,11 @@ export function getWriteScope(role, resource) {
 
 export const canWriteResource = (role, resource) =>
   getWriteScope(role, resource) !== WRITE_SCOPE.NONE;
+
+export const canExportEntity = (role, entity) =>
+  isOfficialRole(role) &&
+  OPERATIONAL_RESOURCES.has(entity) &&
+  !(isGlobalGuruRole(role) && entity === "guru");
 
 export function canWrite(role, resource) {
   if (resource) return canWriteResource(role, resource);

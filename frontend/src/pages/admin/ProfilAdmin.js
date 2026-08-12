@@ -13,6 +13,8 @@ const ROLE_LABEL = {
   super_admin: "Super Admin",
   admin_cabang: "Admin Cabang",
   viewer: "Viewer",
+  viewer_1: "Viewer 1",
+  viewer_2: "Viewer 2",
   penerus_ilmu: "Penerus Ilmu",
   ketua_yayasan: "Ketua Yayasan",
 };

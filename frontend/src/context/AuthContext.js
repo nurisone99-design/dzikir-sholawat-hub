@@ -12,6 +12,7 @@ import {
   isGlobalReadonly as roleIsGlobalReadonly,
   isKetuaYayasan as roleIsKetuaYayasan,
   isPenerusIlmu as roleIsPenerusIlmu,
+  isReadOnlyRole as roleIsReadOnly,
   isSuperAdmin as roleIsSuperAdmin,
   isViewerRole,
 } from "@/lib/permissions";
@@ -54,7 +55,7 @@ export function AuthProvider({ children }) {
   };
 
   const role = user && user.role;
-  const isReadOnly = Boolean(isViewerRole(role) || roleIsGlobalReadonly(role));
+  const isReadOnly = Boolean(roleIsReadOnly(role));
   // Backward-compatible alias: existing components use isViewer as read-only.
   const isViewer = isReadOnly;
   const isSuper = roleIsSuperAdmin(role);

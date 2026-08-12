@@ -60,6 +60,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from access_control import (
     get_data_scope,
     is_branch_scoped,
+    is_global_guru_view,
     require_branch_assignment,
     require_official_role,
     require_super_admin as require_super,
@@ -786,6 +787,9 @@ async def _enrich_guru(docs, scope: Optional[Dict[str, str]] = None):
     return out
 
 def guru_data_scope(user: dict) -> Optional[Dict[str, str]]:
+    # viewer_2 reads guru records across all branches (global scope).
+    if is_global_guru_view(user):
+        return None
     require_branch_assignment(user)
     return get_data_scope(user)
 
@@ -958,7 +962,8 @@ async def delete_message(mid: str, user: dict = Depends(get_current_user)):
 async def dashboard_stats(user: dict = Depends(get_current_user)):
     scope = await valid_branch_scope(user)
     jamaah_filter = jamaah_query(scope)
-    guru_filter = guru_query(scope)
+    guru_scope = None if is_global_guru_view(user) else scope
+    guru_filter = guru_query(guru_scope)
     pengurus_filter = dict(scope or {})
 
     total_jamaah = await db.jamaah.count_documents(jamaah_filter)
@@ -1292,6 +1297,11 @@ EXPORT_PRESETS = {
     ]
 }
 
+# Viewer 2 may only export these entities (always branch-scoped). Guru is
+# globally readable for Viewer 2 but is not exportable, and agenda/galeri/
+# pengumuman exports are also outside the Viewer 2 scope.
+VIEWER_2_EXPORT_ENTITIES = frozenset({"jamaah", "cabang", "pengurus"})
+
 
 def export_presets(entity: str) -> List[dict]:
     presets = EXPORT_PRESETS.get(entity)
@@ -1454,6 +1464,15 @@ async def export_data(entity: str,
     if entity not in DEFAULT_COLUMNS:
         raise HTTPException(status_code=400, detail="Entitas tidak valid")
     
+    # Viewer 2 may only export Jamaah, Cabang, and Pengurus. Guru is globally
+    # readable for Viewer 2 but never exportable; all other entities are also
+    # outside the Viewer 2 export scope.
+    if is_global_guru_view(user) and entity not in VIEWER_2_EXPORT_ENTITIES:
+        raise HTTPException(
+            status_code=403,
+            detail="Role Viewer 2 hanya dapat mengekspor data Jamaah, Cabang, dan Pengurus.",
+        )
+
     if format not in {"xlsx", "pdf"}:
         raise HTTPException(status_code=400, detail="Format export tidak valid")
     filters = await export_query(entity, user, cabang or cabang_id, gender)

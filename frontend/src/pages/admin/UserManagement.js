@@ -21,6 +21,8 @@ const ROLES = [
   { value: "super_admin", label: "Super Admin" },
   { value: "admin_cabang", label: "Admin Cabang" },
   { value: "viewer", label: "Viewer" },
+  { value: "viewer_1", label: "Viewer 1" },
+  { value: "viewer_2", label: "Viewer 2" },
   { value: "penerus_ilmu", label: "Penerus Ilmu" },
   { value: "ketua_yayasan", label: "Ketua Yayasan" },
 ];

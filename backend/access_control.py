@@ -3,12 +3,15 @@ from typing import Any, Dict, Iterable, Optional
 from fastapi import HTTPException
 
 
-GLOBAL_READONLY_ROLES = frozenset({"penerus_ilmu", "ketua_yayasan"})
+GLOBAL_READONLY_ROLES = frozenset({"penerus_ilmu", "ketua_yayasan", "viewer_1"})
 OFFICIAL_ROLES = frozenset(
-    {"super_admin", "admin_cabang", "viewer"} | GLOBAL_READONLY_ROLES
+    {"super_admin", "admin_cabang", "viewer", "viewer_2"} | GLOBAL_READONLY_ROLES
 )
-BRANCH_SCOPED_ROLES = frozenset({"admin_cabang", "viewer"})
+BRANCH_SCOPED_ROLES = frozenset({"admin_cabang", "viewer", "viewer_2"})
 WRITE_ROLES = frozenset({"super_admin", "admin_cabang"})
+# viewer_2 is branch-scoped for cabang/pengurus/jamaah/export but may read
+# every guru record across all branches.
+GLOBAL_GURU_ROLES = frozenset({"viewer_2"})
 
 
 def require_official_role(user: Dict[str, Any]) -> str:
@@ -36,6 +39,11 @@ def is_global_readonly(user: Dict[str, Any]) -> bool:
 
 def is_branch_scoped(user: Dict[str, Any]) -> bool:
     return require_official_role(user) in BRANCH_SCOPED_ROLES
+
+
+def is_global_guru_view(user: Dict[str, Any]) -> bool:
+    """True when the role may read guru records across all branches."""
+    return require_official_role(user) in GLOBAL_GURU_ROLES
 
 
 def can_write(user: Dict[str, Any]) -> bool:

@@ -1,6 +1,7 @@
 import {
   READ_SCOPE,
   WRITE_SCOPE,
+  canExportEntity,
   canReadGlobally,
   canViewResource,
   canWrite,
@@ -10,7 +11,7 @@ import {
 } from "./permissions";
 
 const INTERNAL = ["jamaah", "guru", "pengurus"];
-const GLOBAL_READONLY = ["penerus_ilmu", "ketua_yayasan"];
+const GLOBAL_READONLY = ["penerus_ilmu", "ketua_yayasan", "viewer_1"];
 const GLOBAL_READ_BRANCH_WRITE = ["agenda", "galeri", "pengumuman"];
 
 describe("frontend authorization policy", () => {
@@ -59,6 +60,29 @@ describe("frontend authorization policy", () => {
       expect(canWriteResource(role, resource)).toBe(false);
     });
     expect(canWrite(role)).toBe(false);
+  });
+
+  test("viewer_2 has global guru read, branch read for other resources, and no write", () => {
+    INTERNAL.forEach((resource) => {
+      const expected = resource === "guru" ? READ_SCOPE.GLOBAL : READ_SCOPE.BRANCH;
+      expect(getReadScope("viewer_2", resource)).toBe(expected);
+      expect(canWriteResource("viewer_2", resource)).toBe(false);
+    });
+    ["cabang", "dashboard", "export", "profile"].forEach((resource) => {
+      expect(getReadScope("viewer_2", resource)).toBe(READ_SCOPE.BRANCH);
+    });
+    GLOBAL_READ_BRANCH_WRITE.forEach((resource) => {
+      expect(getReadScope("viewer_2", resource)).toBe(READ_SCOPE.GLOBAL);
+    });
+    expect(canWrite("viewer_2")).toBe(false);
+  });
+
+  test("viewer_2 cannot export guru data", () => {
+    expect(canExportEntity("viewer_2", "guru")).toBe(false);
+    ["jamaah", "cabang", "pengurus", "agenda"].forEach((entity) => {
+      expect(canExportEntity("viewer_2", entity)).toBe(true);
+    });
+    expect(canExportEntity("viewer_1", "guru")).toBe(true);
   });
 
   test("sensitive resources are visible only to super_admin", () => {

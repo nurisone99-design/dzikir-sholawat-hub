@@ -17,8 +17,18 @@ CABANG_A = ObjectId("64c00000000000000000000a")
 CABANG_B = ObjectId("64c00000000000000000000b")
 GURU_A = ObjectId("64d00000000000000000000a")
 GURU_B = ObjectId("64d00000000000000000000b")
-ROLES = ("super_admin", "penerus_ilmu", "ketua_yayasan", "admin_cabang", "viewer")
-GLOBAL_ROLES = ("super_admin", "penerus_ilmu", "ketua_yayasan")
+ROLES = (
+    "super_admin",
+    "penerus_ilmu",
+    "ketua_yayasan",
+    "viewer_1",
+    "admin_cabang",
+    "viewer",
+    "viewer_2",
+)
+GLOBAL_ROLES = ("super_admin", "penerus_ilmu", "ketua_yayasan", "viewer_1")
+# viewer_2 is branch-scoped for export and cannot export guru at all.
+EXPORT_BRANCH_ROLES = ("admin_cabang", "viewer", "viewer_2")
 
 
 def run(coro):
@@ -27,7 +37,7 @@ def run(coro):
 
 def actor(role):
     user = {"id": f"{role}-id", "role": role}
-    if role in {"admin_cabang", "viewer"}:
+    if role in {"admin_cabang", "viewer", "viewer_2"}:
         user["cabang_id"] = str(CABANG_A)
     return user
 
@@ -156,7 +166,7 @@ def worksheet_values(response):
     ("guru", "GURU_A_MARKER", "GURU_B_MARKER"),
     ("pengurus", "PENGURUS_A_MARKER", "PENGURUS_B_MARKER"),
 ])
-@pytest.mark.parametrize("role", ROLES)
+@pytest.mark.parametrize("role", [r for r in ROLES if r != "viewer_2"])
 def test_branch_owned_export_scope(export_db, entity, marker_a, marker_b, role):
     response = make_export(entity, actor(role), fields="nama")
     values = worksheet_values(response)
@@ -167,10 +177,40 @@ def test_branch_owned_export_scope(export_db, entity, marker_a, marker_b, role):
 
 
 @pytest.mark.parametrize("entity,marker_a,marker_b", [
+    ("jamaah", "JAMAAH_A_MARKER", "JAMAAH_B_MARKER"),
+    ("pengurus", "PENGURUS_A_MARKER", "PENGURUS_B_MARKER"),
+])
+@pytest.mark.parametrize("role", EXPORT_BRANCH_ROLES)
+def test_branch_roles_export_only_their_branch(export_db, entity, marker_a, marker_b, role):
+    response = make_export(entity, actor(role), fields="nama")
+    flattened = {cell for row in worksheet_values(response) for cell in row if cell}
+
+    assert marker_a in flattened
+    assert marker_b not in flattened
+
+
+@pytest.mark.parametrize("entity", ["guru", "agenda", "galeri", "pengumuman"])
+def test_viewer2_cannot_export_non_whitelisted_entity(export_db, entity):
+    with pytest.raises(HTTPException) as exc:
+        make_export(entity, actor("viewer_2"), fields="nama")
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("entity,field", [
+    ("jamaah", "nama"),
+    ("cabang", "kota"),
+    ("pengurus", "nama"),
+])
+def test_viewer2_can_export_whitelisted_entity(export_db, entity, field):
+    response = make_export(entity, actor("viewer_2"), fields=field)
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@pytest.mark.parametrize("entity,marker_a,marker_b", [
     ("agenda", "AGENDA_A_MARKER", "AGENDA_B_MARKER"),
     ("galeri", "GALERI_A_MARKER", "GALERI_B_MARKER"),
 ])
-@pytest.mark.parametrize("role", ROLES)
+@pytest.mark.parametrize("role", [r for r in ROLES if r != "viewer_2"])
 def test_global_read_export_scope(export_db, entity, marker_a, marker_b, role):
     response = make_export(entity, actor(role), fields="judul")
     flattened = {cell for row in worksheet_values(response) for cell in row if cell}
@@ -294,7 +334,7 @@ def test_existing_export_without_fields_or_preset_uses_old_defaults(export_db):
     assert len(rows[0]) == len(server.DEFAULT_COLUMNS["jamaah"])
 
 
-@pytest.mark.parametrize("role", ["penerus_ilmu", "ketua_yayasan", "viewer"])
+@pytest.mark.parametrize("role", ["penerus_ilmu", "ketua_yayasan", "viewer_1", "viewer", "viewer_2"])
 def test_export_does_not_grant_write_permission(role):
     assert server.require_write
     with pytest.raises(HTTPException) as exc:

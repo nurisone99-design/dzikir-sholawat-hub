@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { canExportEntity } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +24,9 @@ const ENTITIES = [
 ];
 
 export default function Laporan() {
-  const [entity, setEntity] = useState("jamaah");
+  const { user } = useAuth();
+  const entities = ENTITIES.filter((e) => canExportEntity(user?.role, e.value));
+  const [entity, setEntity] = useState(entities[0]?.value || "jamaah");
   const [cabang, setCabang] = useState([]);
   const [cabangId, setCabangId] = useState("__all__");
   const [gender, setGender] = useState("__all__");
@@ -103,7 +107,7 @@ export default function Laporan() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ENTITIES.map((e) => (
+                {entities.map((e) => (
                   <SelectItem key={e.value} value={e.value}>
                     {e.label}
                   </SelectItem>

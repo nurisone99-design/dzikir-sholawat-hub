@@ -42,6 +42,8 @@ describe("AdminLayout navigation visibility", () => {
   test.each([
     "admin_cabang",
     "viewer",
+    "viewer_1",
+    "viewer_2",
     "penerus_ilmu",
     "ketua_yayasan",
   ])("%s sees operational menus and no sensitive menus", (role) => {
