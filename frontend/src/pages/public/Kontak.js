@@ -15,7 +15,6 @@ import {
   Send,
   Instagram,
   Facebook,
-  Youtube,
 } from "lucide-react";
 
 export default function Kontak() {
@@ -150,16 +149,6 @@ export default function Kontak() {
                 className="h-11 w-11 rounded-xl bg-secondary hover:bg-primary hover:text-white flex items-center justify-center transition-colors"
               >
                 <Facebook className="h-5 w-5" />
-              </a>
-            )}
-            {s.youtube && (
-              <a
-                href={s.youtube}
-                target="_blank"
-                rel="noreferrer"
-                className="h-11 w-11 rounded-xl bg-secondary hover:bg-primary hover:text-white flex items-center justify-center transition-colors"
-              >
-                <Youtube className="h-5 w-5" />
               </a>
             )}
           </div>

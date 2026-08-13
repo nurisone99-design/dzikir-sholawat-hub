@@ -21,6 +21,8 @@ const ENTITIES = [
   { value: "cabang", label: "Data Cabang" },
   { value: "pengurus", label: "Data Pengurus" },
   { value: "agenda", label: "Agenda Majelis" },
+  { value: "galeri", label: "Galeri" },
+  { value: "pengumuman", label: "Pengumuman" },
 ];
 
 export default function Laporan() {
@@ -53,6 +55,10 @@ export default function Laporan() {
       toast.loading("Menyiapkan laporan...", { id: "rpt" });
       const res = await api.get(`/export/${entity}?${params.toString()}`, {
         responseType: "blob",
+        // Pembuatan PDF/Excel untuk data besar bisa lebih lama dari timeout default;
+        // jangan sampai laporan yang sebenarnya berhasil dibuat dianggap gagal
+        // hanya karena permintaan di-timeout terlalu cepat di sisi klien.
+        timeout: 60000,
       });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
@@ -115,25 +121,27 @@ export default function Laporan() {
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label className="mb-1.5 block text-sm">Cabang</Label>
-            <Select value={cabangId} onValueChange={setCabangId}>
-              <SelectTrigger
-                className="rounded-xl"
-                data-testid="laporan-cabang"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Semua Cabang</SelectItem>
-                {cabang.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.kota}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {entity !== "cabang" && (
+            <div>
+              <Label className="mb-1.5 block text-sm">Cabang</Label>
+              <Select value={cabangId} onValueChange={setCabangId}>
+                <SelectTrigger
+                  className="rounded-xl"
+                  data-testid="laporan-cabang"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Semua Cabang</SelectItem>
+                  {cabang.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.kota}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {entity === "jamaah" && (
             <div>
               <Label className="mb-1.5 block text-sm">Gender</Label>

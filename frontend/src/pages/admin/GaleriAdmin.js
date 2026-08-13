@@ -108,8 +108,11 @@ export default function GaleriAdmin() {
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      <Dialog open={open} onOpenChange={(next) => { if (next) setOpen(true); }}>
+        <DialogContent
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} Media</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Judul *</Label><Input value={form.judul || ""} onChange={(e) => setForm({ ...form, judul: e.target.value })} className="rounded-xl" data-testid="galeri-field-judul" /></div>

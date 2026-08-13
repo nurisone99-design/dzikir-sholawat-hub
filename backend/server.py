@@ -53,6 +53,7 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from xml.sax.saxutils import escape as xml_escape
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -272,6 +273,9 @@ class UserCreate(BaseModel):
     status: str = "active"
     cabang_id: Optional[str] = None
     name: Optional[str] = None
+    # Opsional: ID Jamaah/Guru terkait (dipakai frontend untuk auto-isi Nama).
+    # User tanpa ID Jamaah/Guru (mis. Penerus Ilmu) tetap valid.
+    ref_id: Optional[str] = None
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
@@ -280,6 +284,7 @@ class UserUpdate(BaseModel):
     status: Optional[str] = None
     cabang_id: Optional[str] = None
     name: Optional[str] = None
+    ref_id: Optional[str] = None
     password: Optional[str] = None
 
 class ProfileUpdate(BaseModel):
@@ -385,11 +390,29 @@ def cabang_scope_filter(scope: Optional[Dict[str, str]]) -> dict:
         return {}
     return {"_id": ObjectId(scope["cabang_id"])}
 
+async def _enrich_cabang(docs: list) -> list:
+    """Isi guru_pembimbing_nama dari relasi Guru.cabang_ids (bukan field guru_id
+    di dokumen cabang, yang tidak pernah diisi lewat form Data Guru)."""
+    guru_docs = await db.guru.find({}, {"nama": 1, "cabang_id": 1, "cabang_ids": 1}).to_list(5000)
+    cabang_guru_map: Dict[str, List[str]] = {}
+    for g in guru_docs:
+        cids = g.get("cabang_ids") or ([g["cabang_id"]] if g.get("cabang_id") else [])
+        for cid in cids:
+            cabang_guru_map.setdefault(str(cid), []).append(g.get("nama") or "-")
+
+    out = []
+    for doc in docs:
+        d = serialize(doc)
+        names = cabang_guru_map.get(d["id"], [])
+        d["guru_pembimbing_nama"] = ", ".join(names) if names else "-"
+        out.append(d)
+    return out
+
 @api_router.get("/cabang")
 async def list_cabang(user: dict = Depends(get_current_user)):
     scope = await valid_branch_scope(user)
     docs = await db["cabang"].find(cabang_scope_filter(scope)).sort("created_at", -1).to_list(5000)
-    return [serialize(d) for d in docs]
+    return await _enrich_cabang(docs)
 
 @api_router.get("/cabang/{item_id}")
 async def get_cabang(item_id: str, user: dict = Depends(get_current_user)):
@@ -399,7 +422,7 @@ async def get_cabang(item_id: str, user: dict = Depends(get_current_user)):
     doc = await db["cabang"].find_one({"_id": ObjectId(item_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
-    return serialize(doc)
+    return (await _enrich_cabang([doc]))[0]
 
 @api_router.post("/cabang")
 async def create_cabang(payload: Dict[str, Any], user: dict = Depends(get_current_user)):
@@ -1335,6 +1358,25 @@ def parse_export_fields(raw_fields: Optional[str], entity: str, preset: Optional
     return keys
 
 
+def _pdf_column_widths(text_rows: List[List[str]], avail_width: float) -> List[float]:
+    """Bagi lebar tabel PDF proporsional terhadap panjang isi tiap kolom, supaya
+    kolom dengan teks panjang (mis. Alamat) mendapat ruang wrap yang cukup dan
+    tabel tidak melebar melewati halaman."""
+    if not text_rows or not text_rows[0]:
+        return []
+    n = len(text_rows[0])
+    sample = text_rows[:60]
+    weights = [
+        max(max((len(str(row[i])) for row in sample if i < len(row)), default=6), 6)
+        for i in range(n)
+    ]
+    total = sum(weights) or 1
+    min_width = avail_width * 0.07
+    widths = [max(avail_width * w / total, min_width) for w in weights]
+    scale = avail_width / sum(widths)
+    return [w * scale for w in widths]
+
+
 def export_value(row: dict, key: str, entity: str) -> str:
     value = row.get(key)
     if value is None or value == "":
@@ -1391,22 +1433,27 @@ async def build_rows(entity: str, filters: dict):
 
     docs = await db[entity].find(filters).to_list(100000)
     rows = []
-    
-    for i, d in enumerate(docs, 1):
+
+    for d in docs:
         d = serialize(d)
-        d[f"id_{entity}"] = d.get(f"id_{entity}") or d.get("id") or f"{entity[:3].upper()}-{i:04d}"
-        
+        # ID export harus identik dengan ID database: pakai ID asli (id_{entity})
+        # dan jika tidak ada, fallback ke Mongo id asli — jangan buat nomor urut baru.
+        d[f"id_{entity}"] = d.get(f"id_{entity}") or d["id"]
+
         raw_c = str(d.get("cabang_id") or d.get("cabang") or "")
         nama_kota = cabang_map.get(raw_c, d.get("cabang_nama") or d.get("cabang") or "-")
-        
+
         d["cabang_nama"] = nama_kota
         d["cabang"] = nama_kota
-        d["id_cabang"] = nama_kota
+        if entity != "cabang":
+            # Untuk entitas non-cabang, id_cabang dipakai sebagai label nama cabang.
+            # Untuk entitas cabang sendiri, id_cabang harus tetap ID aslinya (lihat di atas).
+            d["id_cabang"] = nama_kota
         guru_id = str(d.get("guru_id") or cabang_guru_map.get(raw_c) or "")
         d["guru_pembimbing_nama"] = guru_map.get(guru_id, d.get("guru_pembimbing_nama") or "-")
-        
+
         rows.append(d)
-        
+
     return rows
 
 
@@ -1535,14 +1582,28 @@ async def export_data(entity: str,
             Spacer(1, 4*mm)
         ]
     
-    table_data = [headers]
-    for r in rows:
-        row_vals = []
-        for k in active_keys:
-            row_vals.append(export_value(r, k, entity))
-        table_data.append(row_vals)
+    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=8, leading=10)
+    header_cell_style = ParagraphStyle(
+        "cellHeader", parent=cell_style, textColor=colors.white, fontName="Helvetica-Bold",
+    )
 
-    t = Table(table_data, repeatRows=1)
+    def to_cell(value, style):
+        text = xml_escape(str(value)).replace("\n", "<br/>")
+        return Paragraph(text, style)
+
+    text_rows = [headers]
+    table_data = [[to_cell(h, header_cell_style) for h in headers]]
+    for r in rows:
+        row_vals = [export_value(r, k, entity) for k in active_keys]
+        text_rows.append(row_vals)
+        table_data.append([to_cell(v, cell_style) for v in row_vals])
+
+    col_widths = _pdf_column_widths(text_rows, doc.width)
+
+    # repeatRows=1 mengulang header di setiap halaman baru saat tabel terpecah;
+    # sel berupa Paragraph agar teks panjang wrap ke baris berikutnya (tinggi baris
+    # menyesuaikan otomatis) alih-alih terpotong atau meluber keluar halaman.
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F766E")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

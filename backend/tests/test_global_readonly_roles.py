@@ -61,6 +61,7 @@ class FakeMappingDB:
     def __init__(self, collection_name, collection):
         self.collection_name = collection_name
         self.collection = collection
+        self.guru = FakeCollection([])
 
     def __getitem__(self, name):
         assert name == self.collection_name
@@ -72,6 +73,7 @@ class FakeBranchDB:
 
     def __init__(self, collection):
         self.cabang = collection
+        self.guru = FakeCollection([])
 
     def __getitem__(self, name):
         assert name == "cabang"

@@ -77,9 +77,11 @@ describe("frontend authorization policy", () => {
     expect(canWrite("viewer_2")).toBe(false);
   });
 
-  test("viewer_2 cannot export guru data", () => {
-    expect(canExportEntity("viewer_2", "guru")).toBe(false);
-    ["jamaah", "cabang", "pengurus", "agenda"].forEach((entity) => {
+  test("viewer_2 can only export its branch-scoped whitelist (matches backend VIEWER_2_EXPORT_ENTITIES)", () => {
+    ["guru", "agenda", "galeri", "pengumuman"].forEach((entity) => {
+      expect(canExportEntity("viewer_2", entity)).toBe(false);
+    });
+    ["jamaah", "cabang", "pengurus"].forEach((entity) => {
       expect(canExportEntity("viewer_2", entity)).toBe(true);
     });
     expect(canExportEntity("viewer_1", "guru")).toBe(true);

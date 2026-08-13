@@ -82,10 +82,17 @@ export function getWriteScope(role, resource) {
 export const canWriteResource = (role, resource) =>
   getWriteScope(role, resource) !== WRITE_SCOPE.NONE;
 
-export const canExportEntity = (role, entity) =>
-  isOfficialRole(role) &&
-  OPERATIONAL_RESOURCES.has(entity) &&
-  !(isGlobalGuruRole(role) && entity === "guru");
+// Harus sama dengan VIEWER_2_EXPORT_ENTITIES di backend (server.py): Viewer 2
+// hanya boleh mengekspor data yang berada dalam scope cabangnya (Jamaah, Cabang,
+// Pengurus). Guru dapat dibaca global tapi tidak untuk export; agenda/galeri/
+// pengumuman juga di luar scope export Viewer 2.
+const VIEWER_2_EXPORT_ENTITIES = new Set(["jamaah", "cabang", "pengurus"]);
+
+export const canExportEntity = (role, entity) => {
+  if (!isOfficialRole(role) || !OPERATIONAL_RESOURCES.has(entity)) return false;
+  if (isGlobalGuruRole(role)) return VIEWER_2_EXPORT_ENTITIES.has(entity);
+  return true;
+};
 
 export function canWrite(role, resource) {
   if (resource) return canWriteResource(role, resource);

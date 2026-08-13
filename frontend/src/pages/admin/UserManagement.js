@@ -36,6 +36,8 @@ export default function UserManagement() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [delTarget, setDelTarget] = useState(null);
+  // Referensi Jamaah + Guru untuk auto-isi Nama saat admin mengetik ID (D2).
+  const [refRecords, setRefRecords] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,8 +47,32 @@ export default function UserManagement() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const openCreate = () => { setForm({ username: "", email: "", password: "", role: "viewer", status: "active", name: "" }); setEditing(null); setOpen(true); };
-  const openEdit = (r) => { setForm({ username: r.username, email: r.email, role: r.role, status: r.status, name: r.name, password: "" }); setEditing(r); setOpen(true); };
+  useEffect(() => {
+    Promise.all([api.get("/jamaah"), api.get("/guru")])
+      .then(([jamaah, guru]) => {
+        setRefRecords([
+          ...(jamaah.data || []).map((j) => ({ id: j.id_jamaah, nama: j.nama })),
+          ...(guru.data || []).map((g) => ({ id: g.id_guru, nama: g.nama })),
+        ]);
+      })
+      .catch((err) => console.error("Gagal memuat referensi Jamaah/Guru:", err));
+  }, []);
+
+  const openCreate = () => { setForm({ username: "", email: "", password: "", role: "viewer", status: "active", name: "", ref_id: "" }); setEditing(null); setOpen(true); };
+  const openEdit = (r) => { setForm({ username: r.username, email: r.email, role: r.role, status: r.status, name: r.name, ref_id: r.ref_id || "", password: "" }); setEditing(r); setOpen(true); };
+
+  const handleRefIdChange = (value) => {
+    const match = refRecords.find(
+      (r) => r.id && r.id.toLowerCase() === value.trim().toLowerCase(),
+    );
+    setForm((p) => ({
+      ...p,
+      ref_id: value,
+      // Jika ID ditemukan, Nama otomatis terisi; jika tidak ditemukan/dikosongkan,
+      // Nama tetap bisa diisi manual (tidak dipaksa/dikosongkan).
+      ...(match ? { name: match.nama } : {}),
+    }));
+  };
 
   const save = async () => {
     if (!form.username || !form.email || (!editing && !form.password)) { toast.error("Lengkapi username, email, dan kata sandi"); return; }
@@ -91,12 +117,28 @@ export default function UserManagement() {
         onEdit={openEdit} onDelete={setDelTarget} selectable={false} testidPrefix="users"
       />
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      <Dialog open={open} onOpenChange={(next) => { if (next) setOpen(true); }}>
+        <DialogContent
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} User</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Username *</Label><Input value={form.username || ""} onChange={(e) => setForm({ ...form, username: e.target.value })} className="rounded-xl" data-testid="users-field-username" /></div>
-            <div><Label className="mb-1.5 block text-sm">Nama</Label><Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" /></div>
+            <div>
+              <Label className="mb-1.5 block text-sm">ID Jamaah/Guru (Opsional)</Label>
+              <Input
+                value={form.ref_id || ""}
+                onChange={(e) => handleRefIdChange(e.target.value)}
+                placeholder="Contoh: JMH-0001 / GUR-0001"
+                className="rounded-xl"
+                data-testid="users-field-ref-id"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Label className="mb-1.5 block text-sm">Nama {!form.ref_id && "(isi manual jika tanpa ID)"}</Label>
+              <Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" data-testid="users-field-name" />
+            </div>
             <div className="sm:col-span-2"><Label className="mb-1.5 block text-sm">Email *</Label><Input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} className="rounded-xl" data-testid="users-field-email" /></div>
             <div className="sm:col-span-2"><Label className="mb-1.5 block text-sm">Kata Sandi {editing && "(kosongkan jika tidak diubah)"} {!editing && "*"}</Label><Input type="password" value={form.password || ""} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-xl" data-testid="users-field-password" /></div>
             <div>

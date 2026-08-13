@@ -327,6 +327,9 @@ export default function CrudPage({
         `/export/${exportEntity}?${params.toString()}`,
         {
           responseType: "blob",
+          // Ekspor data besar bisa lebih lama dari timeout default; jangan sampai
+          // file yang sebenarnya berhasil dibuat dianggap gagal karena timeout dini.
+          timeout: 60000,
         },
       );
 
@@ -354,6 +357,271 @@ export default function CrudPage({
         ? p[key].filter((x) => x !== val)
         : [...(p[key] || []), val],
     }));
+
+  function renderFieldControl(f, opts) {
+    return (
+      <>
+        {f.type === "select" ? (
+          <Select
+            value={form[f.key] || ""}
+            onValueChange={(v) =>
+              setForm((p) => ({
+                ...p,
+                [f.key]: v,
+                ...(f.onSelect ? f.onSelect(v, rawOptions[f.key]) : {}),
+              }))
+            }
+          >
+            <SelectTrigger
+              className="rounded-xl"
+              data-testid={`${endpoint}-field-${f.key}`}
+            >
+              <SelectValue placeholder={`Pilih ${f.label}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {opts.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : f.type === "textarea" ? (
+          <Textarea
+            value={form[f.key] || ""}
+            rows={3}
+            className="rounded-xl"
+            onChange={(e) =>
+              setForm((p) => ({ ...p, [f.key]: e.target.value }))
+            }
+            data-testid={`${endpoint}-field-${f.key}`}
+          />
+        ) : f.type === "tags" ? (
+          <div className="flex flex-wrap gap-2">
+            {(f.tagOptions || []).map((t) => {
+              const active = form[f.key]?.includes(t);
+              return (
+                <button
+                  type="button"
+                  key={t}
+                  onClick={() => toggleTag(f.key, t)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    active
+                      ? "bg-primary text-white border-primary"
+                      : "bg-white text-charcoal border-border hover:border-primary"
+                  }`}
+                  data-testid={`${endpoint}-tag-${f.key}`}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        ) : f.type === "auto_id" ? (
+          <Input
+            value={form[f.key] || ""}
+            disabled
+            readOnly
+            className="rounded-xl bg-secondary/60 font-mono text-charcoal"
+            placeholder="Otomatis dari Cabang & Gender"
+            data-testid={`${endpoint}-field-${f.key}`}
+          />
+        ) : f.type === "dynamic_list" ? (
+          <div className="space-y-2">
+            {(form[f.key] || [""]).map((val, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={val}
+                  className="rounded-xl"
+                  placeholder={
+                    f.placeholder || `${f.label} ${idx + 1}`
+                  }
+                  onChange={(e) => {
+                    const arr = [...(form[f.key] || [""])];
+                    arr[idx] = e.target.value;
+                    setForm((p) => ({ ...p, [f.key]: arr }));
+                  }}
+                  data-testid={`${endpoint}-field-${f.key}-${idx}`}
+                />
+                {(form[f.key] || []).length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 shrink-0"
+                    onClick={() =>
+                      setForm((p) => ({
+                        ...p,
+                        [f.key]: p[f.key].filter((_, i) => i !== idx),
+                      }))
+                    }
+                    data-testid={`${endpoint}-remove-${f.key}`}
+                  >
+                    <X className="h-4 w-4 text-destructive" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-xl gap-1.5 border-gold text-gold hover:bg-gold/5"
+              onClick={() =>
+                setForm((p) => ({
+                  ...p,
+                  [f.key]: [...(p[f.key] || [""]), ""],
+                }))
+              }
+              data-testid={`${endpoint}-add-${f.key}`}
+            >
+              <Plus className="h-4 w-4" />{" "}
+              {f.addLabel || `Tambah ${f.label}`}
+            </Button>
+          </div>
+        ) : f.type === "checkbox_group" ? (
+          <div className="flex flex-wrap gap-2">
+            {opts.map((o) => {
+              const val = typeof o === "string" ? o : o.value;
+              const lab = typeof o === "string" ? o : o.label;
+              const active = (form[f.key] || []).includes(val);
+              return (
+                <button
+                  type="button"
+                  key={val}
+                  onClick={() => toggleTag(f.key, val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
+                    active
+                      ? "bg-primary text-white border-primary"
+                      : "bg-white text-charcoal border-border hover:border-primary"
+                  }`}
+                  data-testid={`${endpoint}-cb-${f.key}`}
+                >
+                  <span
+                    className={`h-3.5 w-3.5 rounded border flex items-center justify-center ${active ? "bg-white border-white" : "border-muted-foreground/40"}`}
+                  >
+                    {active && (
+                      <span className="h-1.5 w-1.5 rounded-sm bg-primary" />
+                    )}
+                  </span>
+                  {lab}
+                </button>
+              );
+            })}
+          </div>
+        ) : f.type === "map" ? (
+          <MapPicker
+            value={{
+              lat: form[f.latKey || "lat"],
+              lng: form[f.lngKey || "lng"],
+            }}
+            onChange={({ lat, lng }) =>
+              setForm((p) => ({
+                ...p,
+                [f.latKey || "lat"]: lat,
+                [f.lngKey || "lng"]: lng,
+              }))
+            }
+          />
+        ) : f.type === "file" ? (
+          <div className="flex-1 w-full min-h-[160px] h-full flex flex-col">
+            <FileUpload
+              value={form[f.key]}
+              folder={endpoint}
+              accept={f.accept}
+              aspect={f.aspect}
+              onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+              testid={`${endpoint}-file-${f.key}`}
+            />
+          </div>
+        ) : f.type === "date" ? (
+          <CustomDatePicker
+            value={form[f.key]}
+            onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+          />
+        ) : (
+          <Input
+            type={f.type === "number" ? "number" : "text"}
+            value={form[f.key] ?? ""}
+            className="rounded-xl"
+            onChange={(e) =>
+              setForm((p) => ({ ...p, [f.key]: e.target.value }))
+            }
+            data-testid={`${endpoint}-field-${f.key}`}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Field "group": mengelompokkan beberapa field terkait dalam satu kotak rapi
+  // (mis. Cabang Bimbingan + Ijazah Kitab + Ijazah Amaliah, atau dua field file
+  // yang ditampilkan berdampingan) tanpa mengubah cara render tiap field itu sendiri.
+  function renderField(f) {
+    if (f.type === "group") {
+      return (
+        <div
+          key={f.key}
+          className="sm:col-span-2 border border-border rounded-xl p-4 bg-secondary/20 space-y-3"
+        >
+          {f.label && (
+            <p className="text-sm font-semibold text-charcoal">{f.label}</p>
+          )}
+          <div
+            className={`grid grid-cols-1 gap-4 ${
+              f.columns === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"
+            }`}
+          >
+            {f.fields.map((sub) => {
+              const subOpts = getScopedBranchOptions({
+                resource,
+                fieldKey: sub.key,
+                options: sub.options || options[sub.key] || [],
+                writeScope,
+                assignedBranchId,
+              });
+              return (
+                <div key={sub.key} className="flex flex-col">
+                  <Label className="mb-1.5 block text-sm">
+                    {sub.label}{" "}
+                    {sub.required && (
+                      <span className="text-destructive">*</span>
+                    )}
+                  </Label>
+                  {renderFieldControl(sub, subOpts)}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    const opts = getScopedBranchOptions({
+      resource,
+      fieldKey: f.key,
+      options: f.options || options[f.key] || [],
+      writeScope,
+      assignedBranchId,
+    });
+    const isFoto = f.key === "foto" || f.type === "file";
+
+    return (
+      <div
+        key={f.key}
+        className={`
+          ${f.full || f.type === "tags" || f.type === "dynamic_list" ? "sm:col-span-2" : ""}
+          ${f.rowSpan === 2 || isFoto ? "sm:row-span-2 sm:col-start-2 flex flex-col h-full" : ""}
+        `}
+      >
+        <Label className="mb-1.5 block text-sm">
+          {f.label}{" "}
+          {f.required && <span className="text-destructive">*</span>}
+        </Label>
+        {renderFieldControl(f, opts)}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -399,8 +667,19 @@ export default function CrudPage({
         testidPrefix={endpoint}
       />
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          // Cegah modal ditutup akibat klik di luar/backdrop — hanya boleh
+          // ditutup lewat tombol Batal/Simpan/X eksplisit di bawah.
+          if (next) setOpen(true);
+        }}
+      >
+        <DialogContent
+          className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="font-display text-xl">
               {editing ? "Edit" : "Tambah"} {title}
@@ -410,216 +689,7 @@ export default function CrudPage({
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
-            {fields.map((f) => {
-              const opts = getScopedBranchOptions({
-                resource,
-                fieldKey: f.key,
-                options: f.options || options[f.key] || [],
-                writeScope,
-                assignedBranchId,
-              });
-              const isFoto = f.key === "foto" || f.type === "file";
-
-              return (
-                <div
-                  key={f.key}
-                  className={`
-                    ${f.full || f.type === "tags" || f.type === "dynamic_list" ? "sm:col-span-2" : ""}
-                    ${f.rowSpan === 2 || isFoto ? "sm:row-span-2 sm:col-start-2 flex flex-col h-full" : ""}
-                  `}
-                >
-                  <Label className="mb-1.5 block text-sm">
-                    {f.label}{" "}
-                    {f.required && <span className="text-destructive">*</span>}
-                  </Label>
-                  {f.type === "select" ? (
-                    <Select
-                      value={form[f.key] || ""}
-                      onValueChange={(v) =>
-                        setForm((p) => ({ ...p, [f.key]: v }))
-                      }
-                    >
-                      <SelectTrigger
-                        className="rounded-xl"
-                        data-testid={`${endpoint}-field-${f.key}`}
-                      >
-                        <SelectValue placeholder={`Pilih ${f.label}`} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {opts.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : f.type === "textarea" ? (
-                    <Textarea
-                      value={form[f.key] || ""}
-                      rows={3}
-                      className="rounded-xl"
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, [f.key]: e.target.value }))
-                      }
-                      data-testid={`${endpoint}-field-${f.key}`}
-                    />
-                  ) : f.type === "tags" ? (
-                    <div className="flex flex-wrap gap-2">
-                      {(f.tagOptions || []).map((t) => {
-                        const active = form[f.key]?.includes(t);
-                        return (
-                          <button
-                            type="button"
-                            key={t}
-                            onClick={() => toggleTag(f.key, t)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                              active
-                                ? "bg-primary text-white border-primary"
-                                : "bg-white text-charcoal border-border hover:border-primary"
-                            }`}
-                            data-testid={`${endpoint}-tag-${f.key}`}
-                          >
-                            {t}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : f.type === "auto_id" ? (
-                    <Input
-                      value={form[f.key] || ""}
-                      disabled
-                      readOnly
-                      className="rounded-xl bg-secondary/60 font-mono text-charcoal"
-                      placeholder="Otomatis dari Cabang & Gender"
-                      data-testid={`${endpoint}-field-${f.key}`}
-                    />
-                  ) : f.type === "dynamic_list" ? (
-                    <div className="space-y-2">
-                      {(form[f.key] || [""]).map((val, idx) => (
-                        <div key={idx} className="flex gap-2">
-                          <Input
-                            value={val}
-                            className="rounded-xl"
-                            placeholder={
-                              f.placeholder || `${f.label} ${idx + 1}`
-                            }
-                            onChange={(e) => {
-                              const arr = [...(form[f.key] || [""])];
-                              arr[idx] = e.target.value;
-                              setForm((p) => ({ ...p, [f.key]: arr }));
-                            }}
-                            data-testid={`${endpoint}-field-${f.key}-${idx}`}
-                          />
-                          {(form[f.key] || []).length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-10 w-10 shrink-0"
-                              onClick={() =>
-                                setForm((p) => ({
-                                  ...p,
-                                  [f.key]: p[f.key].filter((_, i) => i !== idx),
-                                }))
-                              }
-                              data-testid={`${endpoint}-remove-${f.key}`}
-                            >
-                              <X className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl gap-1.5 border-gold text-gold hover:bg-gold/5"
-                        onClick={() =>
-                          setForm((p) => ({
-                            ...p,
-                            [f.key]: [...(p[f.key] || [""]), ""],
-                          }))
-                        }
-                        data-testid={`${endpoint}-add-${f.key}`}
-                      >
-                        <Plus className="h-4 w-4" />{" "}
-                        {f.addLabel || `Tambah ${f.label}`}
-                      </Button>
-                    </div>
-                  ) : f.type === "checkbox_group" ? (
-                    <div className="flex flex-wrap gap-2">
-                      {opts.map((o) => {
-                        const val = typeof o === "string" ? o : o.value;
-                        const lab = typeof o === "string" ? o : o.label;
-                        const active = (form[f.key] || []).includes(val);
-                        return (
-                          <button
-                            type="button"
-                            key={val}
-                            onClick={() => toggleTag(f.key, val)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
-                              active
-                                ? "bg-primary text-white border-primary"
-                                : "bg-white text-charcoal border-border hover:border-primary"
-                            }`}
-                            data-testid={`${endpoint}-cb-${f.key}`}
-                          >
-                            <span
-                              className={`h-3.5 w-3.5 rounded border flex items-center justify-center ${active ? "bg-white border-white" : "border-muted-foreground/40"}`}
-                            >
-                              {active && (
-                                <span className="h-1.5 w-1.5 rounded-sm bg-primary" />
-                              )}
-                            </span>
-                            {lab}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : f.type === "map" ? (
-                    <MapPicker
-                      value={{
-                        lat: form[f.latKey || "lat"],
-                        lng: form[f.lngKey || "lng"],
-                      }}
-                      onChange={({ lat, lng }) =>
-                        setForm((p) => ({
-                          ...p,
-                          [f.latKey || "lat"]: lat,
-                          [f.lngKey || "lng"]: lng,
-                        }))
-                      }
-                    />
-                  ) : f.type === "file" ? (
-                    <div className="flex-1 w-full min-h-[160px] h-full flex flex-col">
-                      <FileUpload
-                        value={form[f.key]}
-                        folder={endpoint}
-                        accept={f.accept}
-                        aspect={f.aspect}
-                        onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
-                        testid={`${endpoint}-file-${f.key}`}
-                      />
-                    </div>
-                  ) : f.type === "date" ? (
-                    <CustomDatePicker
-                      value={form[f.key]}
-                      onChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
-                    />
-                  ) : (
-                    <Input
-                      type={f.type === "number" ? "number" : "text"}
-                      value={form[f.key] ?? ""}
-                      className="rounded-xl"
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, [f.key]: e.target.value }))
-                      }
-                      data-testid={`${endpoint}-field-${f.key}`}
-                    />
-                  )}
-                </div>
-              );
-            })}
+            {fields.map((f) => renderField(f))}
           </div>
           <DialogFooter>
             <Button

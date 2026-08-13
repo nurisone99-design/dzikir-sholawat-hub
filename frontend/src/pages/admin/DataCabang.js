@@ -15,13 +15,13 @@ export default function DataCabang() {
       subtitle="Kelola seluruh cabang Majelis Raudhatul Jannah"
       endpoint="cabang"
       icon={Building2}
-      exportEntity="cabang"
+      // Export Data Cabang tersedia lewat menu "Laporan & Export", bukan tombol
+      // Excel/PDF di halaman ini — lihat pages/admin/Laporan.js.
       searchKeys={["id_cabang", "kota", "alamat", "ketua"]}
-      lookups={[{ key: "guru_id", from: "guru", labelKey: "nama" }]}
       columns={[
         { key: "id_cabang", label: "ID Cabang" },
         { key: "kota", label: "Kota" },
-        { key: "guru_id", label: "Guru Pembimbing" },
+        { key: "guru_pembimbing_nama", label: "Guru Pembimbing", sortable: false },
         { key: "ketua", label: "Ketua Cabang" },
         { key: "no_hp", label: "No. HP/WA" },
         {

@@ -115,6 +115,7 @@ class BranchScopeDB:
                 {"_id": CABANG_B, "kota": "B"},
             ]
         )
+        self.guru = FakeCollection([])
         self.audit_logs = FakeAuditLogs()
         self.pengumuman = FakeCollection(
             [

@@ -126,8 +126,12 @@ export default function Agenda() {
       )}
 
       {/* Form dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={open} onOpenChange={(next) => { if (next) setOpen(true); }}>
+        <DialogContent
+          className="max-w-lg"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Buat"} Agenda</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Judul Agenda *</Label><Input value={form.judul || ""} onChange={(e) => setForm({ ...form, judul: e.target.value })} className="rounded-xl" data-testid="agenda-field-judul" /></div>
