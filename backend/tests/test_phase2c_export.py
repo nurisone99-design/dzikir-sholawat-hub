@@ -189,11 +189,23 @@ def test_branch_roles_export_only_their_branch(export_db, entity, marker_a, mark
     assert marker_b not in flattened
 
 
-@pytest.mark.parametrize("entity", ["guru", "agenda", "galeri", "pengumuman"])
+# "galeri" sengaja tidak diikutkan: entitas ini kini selalu ditolak (400) untuk
+# SEMUA role di endpoint tabular — lihat test_galeri_tabular_export_always_rejected.
+@pytest.mark.parametrize("entity", ["guru", "agenda", "pengumuman"])
 def test_viewer2_cannot_export_non_whitelisted_entity(export_db, entity):
     with pytest.raises(HTTPException) as exc:
         make_export(entity, actor("viewer_2"), fields="nama")
     assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("role", [r for r in ROLES])
+def test_galeri_tabular_export_always_rejected(export_db, role):
+    # Galeri adalah kumpulan foto, bukan data tabular — export sebagai laporan
+    # PDF/Excel harus ditolak untuk semua role (lihat /export/galeri/photos
+    # untuk mekanisme unduh foto JPEG/ZIP yang menggantikannya).
+    with pytest.raises(HTTPException) as exc:
+        make_export("galeri", actor(role), fields="judul")
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.parametrize("entity,field", [
@@ -208,7 +220,6 @@ def test_viewer2_can_export_whitelisted_entity(export_db, entity, field):
 
 @pytest.mark.parametrize("entity,marker_a,marker_b", [
     ("agenda", "AGENDA_A_MARKER", "AGENDA_B_MARKER"),
-    ("galeri", "GALERI_A_MARKER", "GALERI_B_MARKER"),
 ])
 @pytest.mark.parametrize("role", [r for r in ROLES if r != "viewer_2"])
 def test_global_read_export_scope(export_db, entity, marker_a, marker_b, role):
@@ -226,7 +237,7 @@ def test_client_branch_filter_cannot_expand_scope(export_db, entity, parameter):
     assert not any(str(value).endswith("B_MARKER") for value in flattened)
 
 
-@pytest.mark.parametrize("entity", ["agenda", "galeri"])
+@pytest.mark.parametrize("entity", ["agenda"])
 def test_branch_filter_does_not_reduce_global_read_for_branch_role(export_db, entity):
     response = make_export(entity, actor("admin_cabang"), cabang_id=str(CABANG_B), fields="judul")
     markers = {cell for row in worksheet_values(response) for cell in row if cell and "MARKER" in str(cell)}

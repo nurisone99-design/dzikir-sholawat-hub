@@ -372,7 +372,9 @@ class TestViewer2BranchScope:
 
         assert exc.value.status_code == 403
 
-    @pytest.mark.parametrize("entity", ["guru", "agenda", "galeri", "pengumuman"])
+    # "galeri" sengaja tidak diikutkan: entitas ini kini selalu ditolak (400)
+    # untuk SEMUA role pada endpoint tabular — lihat test_galeri_tabular_export_is_always_rejected.
+    @pytest.mark.parametrize("entity", ["guru", "agenda", "pengumuman"])
     def test_non_whitelisted_export_is_forbidden(self, monkeypatch, entity):
         monkeypatch.setattr(server, "db", object())
 
@@ -382,3 +384,15 @@ class TestViewer2BranchScope:
                                    fields="nama", user=viewer2_actor()))
 
         assert exc.value.status_code == 403
+
+    def test_galeri_tabular_export_is_always_rejected(self, monkeypatch):
+        # Galeri adalah kumpulan foto, bukan data tabular — export sebagai
+        # laporan PDF/Excel harus ditolak untuk semua role, bukan hanya Viewer 2.
+        monkeypatch.setattr(server, "db", object())
+
+        with pytest.raises(HTTPException) as exc:
+            run(server.export_data("galeri", format="xlsx", cabang=None,
+                                   cabang_id=None, gender=None, columns=None,
+                                   fields="judul", user=viewer2_actor()))
+
+        assert exc.value.status_code == 400

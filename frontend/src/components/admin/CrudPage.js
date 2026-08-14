@@ -141,9 +141,11 @@ export default function CrudPage({
     load();
   }, [load]);
 
-  // load dynamic options for select fields (optionsFrom)
+  // load dynamic options for select fields (optionsFrom) — juga menelusuri
+  // sub-field di dalam field type "group" (mis. Cabang Bimbingan).
   useEffect(() => {
-    const dyn = fields.filter((f) => f.optionsFrom);
+    const flatFields = fields.flatMap((f) => (f.type === "group" ? f.fields : [f]));
+    const dyn = flatFields.filter((f) => f.optionsFrom);
 
     Promise.all(
       dyn.map(async (f) => {
@@ -642,7 +644,7 @@ export default function CrudPage({
           )}
           <div
             className={`grid grid-cols-1 gap-4 ${
-              f.columns === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"
+              f.columns === 2 ? "sm:grid-cols-2" : f.columns === 1 ? "" : "sm:grid-cols-3"
             }`}
           >
             {f.fields.map((sub) => {
@@ -655,12 +657,14 @@ export default function CrudPage({
               });
               return (
                 <div key={sub.key} className="flex flex-col">
-                  <Label className="mb-1.5 block text-sm">
-                    {sub.label}{" "}
-                    {sub.required && (
-                      <span className="text-destructive">*</span>
-                    )}
-                  </Label>
+                  {!sub.hideLabel && (
+                    <Label className="mb-1.5 block text-sm">
+                      {sub.label}{" "}
+                      {sub.required && (
+                        <span className="text-destructive">*</span>
+                      )}
+                    </Label>
+                  )}
                   {renderFieldControl(sub, subOpts)}
                 </div>
               );

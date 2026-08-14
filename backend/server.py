@@ -23,6 +23,9 @@ def require_min_length(name: str, min_length: int) -> str:
 import os
 import io
 import json
+import re
+import zipfile
+import requests
 from PIL import Image
 import logging
 import asyncio
@@ -51,6 +54,7 @@ import pandas as pd
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from xml.sax.saxutils import escape as xml_escape
@@ -132,6 +136,25 @@ ALLOWED_HOSTS = [
 # Direktori Penyimpanan Upload Gambar
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Gambar kop resmi Yayasan untuk header laporan PDF
+KOP_YAYASAN_PATH = ROOT_DIR / "assets" / "kop-yayasan.png"
+_kop_yayasan_reader_cache = None
+
+
+def _kop_yayasan_reader():
+    """Muat gambar kop Yayasan sebagai ImageReader (di-cache di memori). Mengembalikan
+    None jika file tidak ada/gagal dimuat, agar export PDF tetap jalan tanpa kop."""
+    global _kop_yayasan_reader_cache
+    if _kop_yayasan_reader_cache is None:
+        if not KOP_YAYASAN_PATH.is_file():
+            return None
+        try:
+            _kop_yayasan_reader_cache = ImageReader(str(KOP_YAYASAN_PATH))
+        except Exception:
+            logger.exception("Gagal memuat gambar kop Yayasan")
+            return None
+    return _kop_yayasan_reader_cache
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -1588,7 +1611,15 @@ async def export_data(entity: str,
     
     if entity not in DEFAULT_COLUMNS:
         raise HTTPException(status_code=400, detail="Entitas tidak valid")
-    
+
+    # Galeri adalah kumpulan foto, bukan data tabular — export sebagai
+    # laporan PDF/Excel sengaja tidak didukung. Gunakan GET /export/galeri/photos.
+    if entity == "galeri":
+        raise HTTPException(
+            status_code=400,
+            detail="Galeri tidak dapat diekspor sebagai laporan tabel. Gunakan unduh foto (JPEG/ZIP).",
+        )
+
     # Viewer 2 may only export Jamaah, Cabang, and Pengurus. Guru is globally
     # readable for Viewer 2 but never exportable; all other entities are also
     # outside the Viewer 2 export scope.
@@ -1638,17 +1669,43 @@ async def export_data(entity: str,
         )
 
     settings = await db.settings.find_one({"key": "yayasan"}) or {}
+
+    PAGE_W, PAGE_H = landscape(A4)
+    LEFT_MARGIN = RIGHT_MARGIN = 72  # default reportlab margin (1 inch), dibuat eksplisit
+                                     # agar perhitungan lebar kop konsisten dengan doc.width
+    content_width = PAGE_W - LEFT_MARGIN - RIGHT_MARGIN
+
+    # Kop resmi Yayasan (gambar asli, bukan teks/CSS) hanya dipakai untuk laporan
+    # standar; format "Usulan Nama Dalam" mempertahankan header khususnya sendiri.
+    kop_reader = None if is_usulan else _kop_yayasan_reader()
+    kop_display_w = kop_display_h = 0
+    if kop_reader:
+        img_w_px, img_h_px = kop_reader.getSize()
+        kop_display_w = content_width
+        kop_display_h = kop_display_w * (img_h_px / img_w_px)
+
+    top_margin = (kop_display_h + 10 * mm) if kop_reader else 15 * mm
+
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=15*mm, bottomMargin=15*mm)
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=LEFT_MARGIN, rightMargin=RIGHT_MARGIN,
+        topMargin=top_margin, bottomMargin=15 * mm,
+    )
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("t", parent=styles["Title"], textColor=colors.HexColor("#0F766E"), fontSize=16)
     sub_style = ParagraphStyle("s", parent=styles["Normal"], textColor=colors.HexColor("#C5A059"), fontSize=10, alignment=1)
-    
+
     if is_usulan:
         elems = [
             Paragraph(document_title, title_style), Spacer(1, 4*mm),
             Paragraph(f"Cabang : {branch_label}", styles["Normal"]),
             Paragraph(f"Guru Pembimbing : {teacher_label}", styles["Normal"]),
+            Spacer(1, 4*mm),
+        ]
+    elif kop_reader:
+        elems = [
+            Paragraph(f"Laporan Data {entity.capitalize()}", ParagraphStyle("h", parent=styles["Heading2"])),
             Spacer(1, 4*mm),
         ]
     else:
@@ -1695,10 +1752,116 @@ async def export_data(entity: str,
     elems.append(Spacer(1, 8*mm))
     elems.append(Paragraph(f"Dicetak: {datetime.now().strftime('%d %B %Y %H:%M')} | Total: {len(rows)} data",
                            ParagraphStyle("f", parent=styles["Normal"], fontSize=8, textColor=colors.grey)))
-    doc.build(elems)
+
+    def _draw_kop_header(canvas, _doc):
+        # Digambar via canvas (bukan flowable) agar kop berulang otomatis di
+        # setiap halaman saat tabel terpecah menjadi multi-halaman.
+        if not kop_reader:
+            return
+        canvas.saveState()
+        img_y = PAGE_H - 8 * mm - kop_display_h
+        canvas.drawImage(
+            kop_reader, LEFT_MARGIN, img_y,
+            width=kop_display_w, height=kop_display_h,
+            preserveAspectRatio=True, mask="auto",
+        )
+        canvas.restoreState()
+
+    doc.build(elems, onFirstPage=_draw_kop_header, onLaterPages=_draw_kop_header)
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={entity}.pdf"})
+
+
+def _safe_filename(name: str, fallback: str = "foto") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "").strip()).strip("-")
+    return cleaned or fallback
+
+
+def _galeri_image_to_jpeg(doc: dict) -> Optional[bytes]:
+    """Ambil bytes gambar Galeri (file lokal di /uploads atau URL eksternal lama)
+    dan konversi menjadi JPEG. Mengembalikan None jika gagal/tidak ditemukan."""
+    url = str(doc.get("url") or "")
+    raw: Optional[bytes] = None
+    try:
+        if url.startswith("/uploads/"):
+            path = (UPLOAD_DIR / url[len("/uploads/"):]).resolve()
+            if UPLOAD_DIR.resolve() in path.parents and path.is_file():
+                raw = path.read_bytes()
+        elif url.startswith("http://") or url.startswith("https://"):
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            raw = resp.content
+    except Exception:
+        logger.exception("Gagal mengambil sumber foto Galeri untuk export")
+        return None
+
+    if not raw:
+        return None
+
+    try:
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=92)
+        return out.getvalue()
+    except Exception:
+        logger.exception("Gagal mengonversi foto Galeri ke JPEG")
+        return None
+
+
+@api_router.get("/export/galeri/photos")
+async def export_galeri_photos(ids: str = Query(...), user: dict = Depends(get_current_user)):
+    """Unduh foto Galeri sebagai JPEG (satu foto) atau ZIP berisi JPEG (banyak
+    foto). Galeri adalah kumpulan foto, bukan data tabular — lihat export_data."""
+    require_official_role(user)
+    if is_global_guru_view(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Role Viewer 2 tidak dapat mengekspor Galeri.",
+        )
+
+    id_list = [i.strip() for i in ids.split(",") if i.strip()]
+    if not id_list:
+        raise HTTPException(status_code=400, detail="Tidak ada foto yang dipilih")
+    invalid = [i for i in id_list if not ObjectId.is_valid(i)]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"ID foto tidak valid: {', '.join(invalid)}")
+
+    docs = await db.galeri.find({"_id": {"$in": [ObjectId(i) for i in id_list]}}).to_list(1000)
+    doc_map = {str(d["_id"]): d for d in docs}
+    ordered = [doc_map[i] for i in id_list if i in doc_map]
+    if not ordered:
+        raise HTTPException(status_code=404, detail="Foto tidak ditemukan")
+
+    converted = [(d, _galeri_image_to_jpeg(d)) for d in ordered]
+    usable = [(d, jpeg) for d, jpeg in converted if jpeg]
+    if not usable:
+        raise HTTPException(status_code=422, detail="Foto yang dipilih tidak dapat diproses menjadi JPEG")
+
+    await log_action(user, "EXPORT", "galeri", f"Unduh {len(usable)} foto sebagai JPEG")
+
+    if len(usable) == 1:
+        doc, jpeg_bytes = usable[0]
+        filename = f"{_safe_filename(doc.get('judul'))}.jpg"
+        return StreamingResponse(
+            io.BytesIO(jpeg_bytes),
+            media_type="image/jpeg",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for idx, (doc, jpeg_bytes) in enumerate(usable, 1):
+            zf.writestr(f"foto-{idx:03d}.jpg", jpeg_bytes)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="galeri.zip"'},
+    )
+
 
 # ------------------------------------------------------------------ startup & static mounts
 @api_router.post("/upload/{folder}")

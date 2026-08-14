@@ -38,6 +38,7 @@ export default function Agenda() {
   const [bcGuru, setBcGuru] = useState("__all__");
   const [filterCabang, setFilterCabang] = useState("__all__");
   const [filterGuru, setFilterGuru] = useState("__all__");
+  const [broadcasting, setBroadcasting] = useState(false);
 
   const cabangMap = Object.fromEntries(cabang.map((c) => [c.id, c.kota]));
   // Relasi Guru -> Cabang yang benar ada di Guru.cabang_ids (bukan Cabang.guru_id).
@@ -84,6 +85,22 @@ export default function Agenda() {
     );
     const num = String(targetJamaah?.no_hp || targetJamaah?.nik || "").replace(/\D/g, "");
     window.open(`https://wa.me/${num}?text=${msg}`, "_blank");
+  };
+
+  // Menjalankan broadcast ke seluruh target hasil filter aktif (Cabang + Guru
+  // Pembimbing), memakai mekanisme sendBroadcast per-jamaah yang sudah ada —
+  // tidak membuat mekanisme WhatsApp baru.
+  const sendBulkBroadcast = () => {
+    if (broadcasting || filteredJamaah.length === 0) return;
+    setBroadcasting(true);
+    try {
+      filteredJamaah.forEach((j) => sendBroadcast(j));
+      toast.success(`Broadcast WhatsApp dikirim ke ${filteredJamaah.length} jamaah`);
+    } finally {
+      // Jeda singkat sebagai guard agar tombol tidak bisa diklik ulang
+      // sebelum status disabled sempat ter-render (mencegah double submit).
+      setTimeout(() => setBroadcasting(false), 800);
+    }
   };
 
   const filteredJamaah = jamaah.filter((j) => {
@@ -227,6 +244,15 @@ export default function Agenda() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="broadcast-target-count">
               <Users className="h-4 w-4" /> {filteredJamaah.length} jamaah menjadi target broadcast
             </div>
+            <Button
+              onClick={sendBulkBroadcast}
+              disabled={filteredJamaah.length === 0 || broadcasting}
+              className="w-full rounded-xl gap-2 bg-[#25D366] hover:bg-[#20bd5a]"
+              data-testid="broadcast-send-all"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {broadcasting ? "Mengirim..." : "Kirim Broadcast WhatsApp"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

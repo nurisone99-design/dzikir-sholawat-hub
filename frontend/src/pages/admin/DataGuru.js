@@ -74,10 +74,10 @@ export default function DataGuru() {
           { key: "no_hp", label: "No. HP/WhatsApp", type: "text" },
           { key: "alamat", label: "Alamat Lengkap", type: "textarea" },
           {
-            key: "kelompok_bimbingan_ijazah",
-            label: "Cabang Bimbingan & Ijazah",
+            key: "cabang_bimbingan_group",
+            label: "Cabang Bimbingan",
             type: "group",
-            columns: 3,
+            columns: 1,
             fields: [
               {
                 key: "cabang_ids",
@@ -85,18 +85,37 @@ export default function DataGuru() {
                 type: "checkbox_group",
                 optionsFrom: "cabang",
                 optionLabel: "kota",
+                hideLabel: true,
               },
+            ],
+          },
+          {
+            key: "ijazah_kitab_group",
+            label: "Ijazah Kitab",
+            type: "group",
+            columns: 1,
+            fields: [
               {
                 key: "ijazah_kitab",
                 label: "Ijazah Kitab",
                 type: "checkbox_group",
                 options: KITAB,
+                hideLabel: true,
               },
+            ],
+          },
+          {
+            key: "ijazah_amaliah_group",
+            label: "Ijazah Amaliah",
+            type: "group",
+            columns: 1,
+            fields: [
               {
                 key: "ijazah_amaliah",
                 label: "Ijazah Amaliah",
                 type: "checkbox_group",
                 options: AMALIAH,
+                hideLabel: true,
               },
             ],
           },
