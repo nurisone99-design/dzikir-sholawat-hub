@@ -67,20 +67,27 @@ export default function DataPengurus() {
           },
           {
             key: "jamaah_id",
-            label: "Pilih dari Jamaah (opsional)",
-            type: "select",
-            optionsFrom: "jamaah",
-            optionLabel: "nama",
-            onSelect: (value, jamaahList) => {
-              const j = (jamaahList || []).find((r) => r.id === value);
-              if (!j) return {};
-              return {
-                nama: j.nama || "",
-                cabang_id: j.cabang_id || j.id_cabang || j.cabang || "",
-              };
-            },
+            label: "ID Jamaah (opsional)",
+            type: "id_lookup",
+            placeholder: "Masukkan ID Jamaah, contoh: JMH-0001",
+            // Lookup langsung ke database (bukan mencocokkan daftar Jamaah yang
+            // kebetulan sudah termuat di frontend) — lihat GET /jamaah/lookup/{id}.
+            lookupUrl: (value) => `/jamaah/lookup/${encodeURIComponent(value)}`,
+            notFoundMessage: "ID Jamaah tidak ditemukan.",
+            onFound: (j) => ({
+              nama: j.nama || "",
+              cabang_id: j.cabang_id || j.id_cabang || j.cabang || "",
+            }),
           },
-          { key: "nama", label: "Nama Pengurus", type: "text", required: true },
+          {
+            key: "nama",
+            label: "Nama Pengurus",
+            type: "text",
+            required: true,
+            // Read-only saat ID Jamaah valid ditemukan, agar Nama tidak berbeda
+            // dari data Jamaah. Kosongkan ID Jamaah untuk mengisi Nama manual.
+            lockedBy: "jamaah_id",
+          },
           { key: "jabatan", label: "Jabatan di Yayasan", type: "text", required: true },
           {
             key: "cabang_id",

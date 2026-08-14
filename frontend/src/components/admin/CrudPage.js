@@ -1,6 +1,6 @@
 import ExportDialog from "@/components/admin/ExportDialog";
 import { CustomDatePicker } from "@/components/ui/date-picker";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import api, { apiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -85,7 +85,42 @@ export default function CrudPage({
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  // Status pencarian untuk field type "id_lookup" (mis. ID Jamaah di Pengurus):
+  // { [fieldKey]: { status: "loading"|"found"|"error", message } | null }
+  const [lookupStatus, setLookupStatus] = useState({});
+  const lookupTimersRef = useRef({});
   const queryParamsKey = JSON.stringify(queryParams);
+
+  // Cari data berdasarkan ID bisnis langsung ke backend (bukan mencocokkan
+  // daftar yang kebetulan sudah termuat di frontend), lalu terapkan hasilnya
+  // (mis. auto-isi Nama) lewat f.onFound.
+  const performLookup = useCallback(async (f, rawValue) => {
+    const value = (rawValue || "").trim();
+    if (!value) {
+      setLookupStatus((p) => ({ ...p, [f.key]: null }));
+      return;
+    }
+    setLookupStatus((p) => ({ ...p, [f.key]: { status: "loading", message: "Mencari..." } }));
+    try {
+      const { data } = await api.get(f.lookupUrl(value));
+      setForm((p) => ({ ...p, ...(f.onFound ? f.onFound(data) : {}) }));
+      setLookupStatus((p) => ({ ...p, [f.key]: { status: "found", message: null } }));
+    } catch (e) {
+      setLookupStatus((p) => ({
+        ...p,
+        [f.key]: {
+          status: "error",
+          message: f.notFoundMessage || apiError(e.response?.data?.detail),
+        },
+      }));
+    }
+  }, []);
+
+  const handleIdLookupChange = (f, value) => {
+    setForm((p) => ({ ...p, [f.key]: value }));
+    clearTimeout(lookupTimersRef.current[f.key]);
+    lookupTimersRef.current[f.key] = setTimeout(() => performLookup(f, value), 500);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,6 +228,7 @@ export default function CrudPage({
     });
     setForm(init);
     setEditing(null);
+    setLookupStatus({});
     setOpen(true);
   };
 
@@ -221,6 +257,12 @@ export default function CrudPage({
     });
     setForm(init);
     setEditing(row);
+    setLookupStatus({});
+    fields.forEach((f) => {
+      if (f.type === "id_lookup" && init[f.key]) {
+        performLookup(f, init[f.key]);
+      }
+    });
     setOpen(true);
   };
 
@@ -369,7 +411,28 @@ export default function CrudPage({
   function renderFieldControl(f, opts) {
     return (
       <>
-        {f.type === "select" ? (
+        {f.type === "id_lookup" ? (
+          <div>
+            <Input
+              value={form[f.key] || ""}
+              placeholder={f.placeholder}
+              className="rounded-xl"
+              onChange={(e) => handleIdLookupChange(f, e.target.value)}
+              data-testid={`${endpoint}-field-${f.key}`}
+            />
+            {lookupStatus[f.key]?.message && (
+              <p
+                className={`text-xs mt-1 ${
+                  lookupStatus[f.key].status === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {lookupStatus[f.key].message}
+              </p>
+            )}
+          </div>
+        ) : f.type === "select" ? (
           <Select
             value={form[f.key] || ""}
             onValueChange={(v) =>
@@ -552,6 +615,7 @@ export default function CrudPage({
           <Input
             type={f.type === "number" ? "number" : "text"}
             value={form[f.key] ?? ""}
+            disabled={f.lockedBy && lookupStatus[f.lockedBy]?.status === "found"}
             className="rounded-xl"
             onChange={(e) =>
               setForm((p) => ({ ...p, [f.key]: e.target.value }))

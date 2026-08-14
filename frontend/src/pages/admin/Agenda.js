@@ -224,20 +224,8 @@ export default function Agenda() {
                 </Select>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="broadcast-target-count">
               <Users className="h-4 w-4" /> {filteredJamaah.length} jamaah menjadi target broadcast
-            </div>
-            <div className="max-h-52 overflow-y-auto scrollbar-thin space-y-2 border rounded-xl p-2">
-              {filteredJamaah.map((j) => (
-                <div key={j.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-secondary/50">
-                  <div><p className="text-sm font-medium text-charcoal">{j.nama}</p><p className="text-xs text-muted-foreground">{cabangMap[j.cabang_id]}</p></div>
-                  <Button size="sm" variant="outline" className="rounded-lg gap-1.5 h-8"
-                    onClick={() => sendBroadcast(j)} data-testid="broadcast-send-single">
-                    <MessageCircle className="h-3.5 w-3.5 text-[#25D366]" /> Kirim
-                  </Button>
-                </div>
-              ))}
-              {filteredJamaah.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Tidak ada jamaah di cabang ini.</p>}
             </div>
           </div>
         </DialogContent>

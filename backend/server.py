@@ -588,6 +588,17 @@ async def list_jamaah(user: dict = Depends(get_current_user)):
     return [serialize(d) for d in docs]
 
 
+@api_router.get("/jamaah/lookup/{id_jamaah}")
+async def lookup_jamaah_by_id(id_jamaah: str, user: dict = Depends(get_current_user)):
+    """Cari Jamaah berdasarkan ID bisnis (mis. JMH-0001) langsung ke database —
+    dipakai form Data Pengurus untuk auto-isi Nama dari ID Jamaah yang diketik."""
+    scope = jamaah_data_scope(user)
+    doc = await db.jamaah.find_one(jamaah_query(scope, {"id_jamaah": id_jamaah.strip()}))
+    if not doc:
+        raise HTTPException(status_code=404, detail="ID Jamaah tidak ditemukan.")
+    return serialize(doc)
+
+
 @api_router.get("/jamaah/{item_id}")
 async def get_jamaah(item_id: str, user: dict = Depends(get_current_user)):
     scope = jamaah_data_scope(user)

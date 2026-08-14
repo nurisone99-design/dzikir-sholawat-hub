@@ -16,6 +16,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import FileUpload from "@/components/admin/FileUpload";
 import { Images, Plus, Pencil, Trash2, Eye, EyeOff } from "lucide-react";
 
 const KATS = ["Dzikir Rutin", "Hari Besar Islam", "Harlah", "Kegiatan Sosial"];
@@ -149,11 +150,11 @@ export default function GaleriAdmin() {
         <DialogContent
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
+          hideClose
         >
           <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} Media</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Judul *</Label><Input value={form.judul || ""} onChange={(e) => setForm({ ...form, judul: e.target.value })} className="rounded-xl" data-testid="galeri-field-judul" /></div>
-            <div><Label className="mb-1.5 block text-sm">URL Media (foto/video) *</Label><Input value={form.url || ""} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://..." className="rounded-xl" data-testid="galeri-field-url" /></div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="mb-1.5 block text-sm">Kategori</Label>
@@ -170,6 +171,25 @@ export default function GaleriAdmin() {
                 </Select>
               </div>
             </div>
+            {form.type === "video" ? (
+              // Video belum punya mekanisme upload sendiri — pertahankan input URL
+              // seperti sebelumnya agar data/fungsi video lama tidak rusak.
+              <div>
+                <Label className="mb-1.5 block text-sm">URL Media (video) *</Label>
+                <Input value={form.url || ""} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://..." className="rounded-xl" data-testid="galeri-field-url" />
+              </div>
+            ) : (
+              <div>
+                <Label className="mb-1.5 block text-sm">Foto Media *</Label>
+                <FileUpload
+                  value={form.url}
+                  folder="galeri"
+                  accept="image/*"
+                  onChange={(v) => setForm({ ...form, url: v })}
+                  testid="galeri-field-foto"
+                />
+              </div>
+            )}
             <div className="flex items-center justify-between rounded-xl bg-secondary/50 px-4 py-3">
               <Label className="text-sm">Publikasikan ke situs publik</Label>
               <Switch checked={form.published} onCheckedChange={(v) => setForm({ ...form, published: v })} data-testid="galeri-field-published" />
