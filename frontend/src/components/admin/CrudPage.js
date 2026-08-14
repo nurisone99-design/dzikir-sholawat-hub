@@ -61,6 +61,13 @@ export default function CrudPage({
   icon: Icon,
   extraOptions = {},
   lookups = [],
+  // Filter server-side opsional (mis. Guru Pembimbing di Data Cabang) — nilainya
+  // dikirim sebagai query param ke backend sehingga data yang diminta memang
+  // sudah difilter oleh MongoDB, bukan hanya difilter ulang di frontend.
+  queryParams = {},
+  // Kontrol tambahan (mis. dropdown filter server-side) yang dirender tepat di
+  // atas tabel, tanpa mengubah DataTable itu sendiri.
+  toolbarSlot = null,
 }) {
   const { user, canWriteResource, getWriteScope } = useAuth();
   const resource = resolveCrudResource(endpoint);
@@ -78,21 +85,22 @@ export default function CrudPage({
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const queryParamsKey = JSON.stringify(queryParams);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get(`/${endpoint}`);
-
-      console.log("DATA GURU =", data);
-
+      const { data } = await api.get(`/${endpoint}`, { params: queryParams });
       setRows(data);
     } catch (e) {
       toast.error(apiError(e.response?.data?.detail));
     } finally {
       setLoading(false);
     }
-  }, [endpoint]);
+    // queryParams dibandingkan lewat queryParamsKey (string stabil) agar tidak
+    // memicu fetch ulang tak berujung akibat objek baru di setiap render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint, queryParamsKey]);
 
   useEffect(() => {
     load();
@@ -659,6 +667,7 @@ export default function CrudPage({
         loading={loading}
         searchKeys={searchKeys}
         filters={resolvedFilters}
+        extraToolbar={toolbarSlot}
         onEdit={openEdit}
         onDelete={setDeleteTarget}
         onBulkDelete={bulkDelete}

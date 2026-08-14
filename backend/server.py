@@ -409,9 +409,17 @@ async def _enrich_cabang(docs: list) -> list:
     return out
 
 @api_router.get("/cabang")
-async def list_cabang(user: dict = Depends(get_current_user)):
+async def list_cabang(
+    user: dict = Depends(get_current_user),
+    guru_id: Optional[str] = Query(None),
+):
     scope = await valid_branch_scope(user)
     docs = await db["cabang"].find(cabang_scope_filter(scope)).sort("created_at", -1).to_list(5000)
+    if guru_id and str(guru_id).strip().lower() not in {"all", "__all__", "", "null", "undefined", "none"}:
+        # Relasi Cabang <-> Guru yang benar ada di Guru.cabang_ids (reverse lookup);
+        # bandingkan terhadap _id cabang yang sebenarnya, bukan sekadar filter di frontend.
+        allowed_ids = set(await _guru_cabang_ids(str(guru_id).strip()))
+        docs = [d for d in docs if str(d["_id"]) in allowed_ids]
     return await _enrich_cabang(docs)
 
 @api_router.get("/cabang/{item_id}")
@@ -1293,7 +1301,10 @@ COLUMN_TITLE_MAP = {
 
 # Explicit export whitelists. Never derive exportable columns from MongoDB documents.
 DEFAULT_COLUMNS = {
-    "jamaah": ["id", "nama", "nik", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "no_hp", "nama_ortu", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    # "id_jamaah" adalah ID bisnis yang sama dengan yang tampil di /admin/jamaah
+    # (mis. JMH-0013). JANGAN pakai "id" (Mongo _id) di sini — itulah sumber bug
+    # ID Jamaah pada export tampil sebagai ObjectId mentah.
+    "jamaah": ["id_jamaah", "nama", "nik", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "no_hp", "nama_ortu", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
     "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah"],
     "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],
@@ -1303,7 +1314,9 @@ DEFAULT_COLUMNS = {
 }
 
 EXPORT_FIELDS = {
-    "jamaah": ["id", "id_jamaah", "nama", "nik", "no_ktp", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "cabang_nama", "guru_pembimbing_nama", "no_hp", "nama_ortu", "nama_orang_tua", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    # "id" (Mongo _id mentah) sengaja tidak lagi ditawarkan sebagai kolom yang
+    # bisa dipilih untuk Jamaah — gunakan "id_jamaah" (ID bisnis, mis. JMH-0013).
+    "jamaah": ["id_jamaah", "nama", "nik", "no_ktp", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "cabang_nama", "guru_pembimbing_nama", "no_hp", "nama_ortu", "nama_orang_tua", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
     "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah", "no_hp", "alamat", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],

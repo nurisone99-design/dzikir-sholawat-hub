@@ -74,13 +74,6 @@ export default function DataGuru() {
           { key: "no_hp", label: "No. HP/WhatsApp", type: "text" },
           { key: "alamat", label: "Alamat Lengkap", type: "textarea" },
           {
-            key: "ijazah_nama_dalam",
-            label: "Ijazah Nama Dalam",
-            type: "dynamic_list",
-            addLabel: "Tambah Nama Dalam",
-            placeholder: "Masukkan nama dalam",
-          },
-          {
             key: "kelompok_bimbingan_ijazah",
             label: "Cabang Bimbingan & Ijazah",
             type: "group",
@@ -106,6 +99,13 @@ export default function DataGuru() {
                 options: AMALIAH,
               },
             ],
+          },
+          {
+            key: "ijazah_nama_dalam",
+            label: "Ijazah Nama Dalam",
+            type: "dynamic_list",
+            addLabel: "Tambah Nama Dalam",
+            placeholder: "Masukkan nama dalam",
           },
           {
             key: "foto_sk_group",

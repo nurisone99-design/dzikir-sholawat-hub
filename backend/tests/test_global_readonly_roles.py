@@ -105,7 +105,8 @@ class TestGlobalReadonlyOperationalReads:
         collection = FakeCollection(documents)
         monkeypatch.setattr(server, "db", FakeMappingDB(entity, collection))
 
-        result = run(route_endpoint(f"/api/{entity}")(actor(role)))
+        extra = {"guru_id": None} if entity == "cabang" else {}
+        result = run(route_endpoint(f"/api/{entity}")(actor(role), **extra))
 
         assert {row["nama"] for row in result} == {
             "BRANCH_A",
@@ -287,7 +288,7 @@ class TestViewer2BranchScope:
         collection = FakeCollection(branch_documents)
         monkeypatch.setattr(server, "db", FakeBranchDB(collection))
 
-        result = run(server.list_cabang(viewer2_actor()))
+        result = run(server.list_cabang(viewer2_actor(), guru_id=None))
 
         assert {row["nama"] for row in result} == {"BRANCH_A"}
         assert collection.find_queries == [

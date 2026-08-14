@@ -1,6 +1,14 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import CrudPage from "@/components/admin/CrudPage";
 import { Building2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import api from "@/lib/api";
 
 // Auto ID Cabang: prefix dari Guru Pembimbing, mis. G01-CB-01
 const computeCabangId = (form, rows, raw) => {
@@ -9,6 +17,16 @@ const computeCabangId = (form, rows, raw) => {
 };
 
 export default function DataCabang() {
+  const [guru, setGuru] = useState([]);
+  const [guruFilter, setGuruFilter] = useState("__all__");
+
+  useEffect(() => {
+    api
+      .get("/guru")
+      .then((r) => setGuru(r.data || []))
+      .catch((err) => console.error("Gagal memuat data guru:", err));
+  }, []);
+
   return (
     <CrudPage
       title="Data Cabang"
@@ -18,6 +36,30 @@ export default function DataCabang() {
       // Export Data Cabang tersedia lewat menu "Laporan & Export", bukan tombol
       // Excel/PDF di halaman ini — lihat pages/admin/Laporan.js.
       searchKeys={["id_cabang", "kota", "alamat", "ketua"]}
+      // Filter Guru Pembimbing: query MongoDB backend sungguhan (bukan filter
+      // frontend terhadap data yang kebetulan sudah termuat) via relasi
+      // Guru.cabang_ids yang sudah dipakai halaman ini.
+      queryParams={guruFilter !== "__all__" ? { guru_id: guruFilter } : {}}
+      toolbarSlot={
+        <div className="flex items-center gap-2">
+          <Select value={guruFilter} onValueChange={setGuruFilter}>
+            <SelectTrigger
+              className="w-[220px] rounded-xl"
+              data-testid="cabang-filter-guru"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Semua Guru Pembimbing</SelectItem>
+              {guru.map((g) => (
+                <SelectItem key={g.id} value={g.id}>
+                  {g.nama}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      }
       columns={[
         { key: "id_cabang", label: "ID Cabang" },
         { key: "kota", label: "Kota" },

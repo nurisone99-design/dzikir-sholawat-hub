@@ -19,7 +19,7 @@ const PAGE_SIZE = 8;
 export default function DataTable({
   columns, rows, loading, searchKeys = [], filters = [],
   onEdit, onDelete, onBulkDelete, onExport, canWrite = true, canWriteRow,
-  selectable = true, testidPrefix = "table",
+  selectable = true, testidPrefix = "table", extraToolbar = null,
 }) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState({ key: null, dir: 1 });
@@ -76,6 +76,7 @@ export default function DataTable({
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {extraToolbar}
           {filters.map((f) => (
             <Select key={f.key}
               value={filterVals[f.key] || "__all__"}

@@ -105,28 +105,10 @@ export default function DataJamaah() {
     fetchCabang();
   }, []);
 
-  const formatJamaahId = (r) => {
-    if (
-      r.id_jamaah &&
-      !r.id_jamaah.includes("JAM-") &&
-      r.id_jamaah.length > 20
-    ) {
-      const rawCabang = String(r.id_cabang || r.cabang_id || r.cabang || "000");
-      const last3Cabang = rawCabang.slice(-3).toUpperCase();
-      const num = String(r.no_urut || r.index || 1).padStart(5, "0");
-      return `${last3Cabang}-${num}`;
-    }
-
-    if (r.id_jamaah) {
-      const rawCabang = String(r.id_cabang || r.cabang_id || r.cabang || "000");
-      const last3Cabang = rawCabang.slice(-3).toUpperCase();
-      const cleanNum = String(r.id_jamaah).replace(/[^0-9]/g, "");
-      const num = cleanNum ? cleanNum.padStart(5, "0") : "00001";
-      return `${last3Cabang}-${num}`;
-    }
-
-    return "000-00001";
-  };
+  // ID Jamaah yang ditampilkan HARUS identik dengan field id_jamaah asli di
+  // database (mis. "JMH-0013") — sama seperti yang dipakai backend saat export
+  // Excel/PDF. Jangan membuat/format ulang ID (mis. dari potongan ObjectId).
+  const formatJamaahId = (r) => r.id_jamaah || r.id || "-";
 
   const getCabangName = (r) => {
     if (r.cabang_nama) return r.cabang_nama;

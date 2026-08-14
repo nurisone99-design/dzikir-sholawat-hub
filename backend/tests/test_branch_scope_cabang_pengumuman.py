@@ -145,7 +145,7 @@ class TestCabangReadScoping:
     def test_global_roles_read_all_cabang(self, branch_scope_db, role):
         endpoint = route_endpoint("/api/cabang", "GET")
 
-        result = run(endpoint(actor(role)))
+        result = run(endpoint(actor(role), guru_id=None))
 
         assert {row["kota"] for row in result} == {"A", "B"}
 
@@ -153,7 +153,7 @@ class TestCabangReadScoping:
     def test_branch_scoped_roles_read_only_own_cabang(self, branch_scope_db, role):
         endpoint = route_endpoint("/api/cabang", "GET")
 
-        result = run(endpoint(actor(role, CABANG_A)))
+        result = run(endpoint(actor(role, CABANG_A), guru_id=None))
 
         assert [row["kota"] for row in result] == ["A"]
 
