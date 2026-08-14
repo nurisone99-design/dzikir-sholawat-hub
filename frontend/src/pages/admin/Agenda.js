@@ -27,6 +27,7 @@ export default function Agenda() {
   const [rows, setRows] = useState([]);
   const [cabang, setCabang] = useState([]);
   const [jamaah, setJamaah] = useState([]);
+  const [guru, setGuru] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -34,14 +35,23 @@ export default function Agenda() {
   const [delTarget, setDelTarget] = useState(null);
   const [broadcast, setBroadcast] = useState(null);
   const [bcCabang, setBcCabang] = useState("__all__");
+  const [bcGuru, setBcGuru] = useState("__all__");
+  const [filterCabang, setFilterCabang] = useState("__all__");
+  const [filterGuru, setFilterGuru] = useState("__all__");
 
   const cabangMap = Object.fromEntries(cabang.map((c) => [c.id, c.kota]));
+  // Relasi Guru -> Cabang yang benar ada di Guru.cabang_ids (bukan Cabang.guru_id).
+  const guruCabangIds = (guruId) => {
+    const g = guru.find((x) => x.id === guruId);
+    if (!g) return [];
+    return g.cabang_ids || (g.cabang_id ? [g.cabang_id] : []);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, c, j] = await Promise.all([api.get("/agenda"), api.get("/cabang"), api.get("/jamaah")]);
-      setRows(a.data); setCabang(c.data); setJamaah(j.data);
+      const [a, c, j, g] = await Promise.all([api.get("/agenda"), api.get("/cabang"), api.get("/jamaah"), api.get("/guru")]);
+      setRows(a.data); setCabang(c.data); setJamaah(j.data); setGuru(g.data);
     } catch (e) { toast.error(apiError(e.response?.data?.detail)); }
     finally { setLoading(false); }
   }, []);
@@ -76,9 +86,19 @@ export default function Agenda() {
     window.open(`https://wa.me/${num}?text=${msg}`, "_blank");
   };
 
-  const filteredJamaah = bcCabang === "__all__" ? jamaah : jamaah.filter((j) => j.cabang_id === bcCabang);
+  const filteredJamaah = jamaah.filter((j) => {
+    const matchCabang = bcCabang === "__all__" || j.cabang_id === bcCabang;
+    const matchGuru = bcGuru === "__all__" || guruCabangIds(bcGuru).includes(j.cabang_id);
+    return matchCabang && matchGuru;
+  });
 
-  const sorted = [...rows].sort((a, b) => (a.tanggal < b.tanggal ? 1 : -1));
+  const sorted = [...rows]
+    .sort((a, b) => (a.tanggal < b.tanggal ? 1 : -1))
+    .filter((a) => {
+      const matchCabang = filterCabang === "__all__" || a.cabang_id === filterCabang;
+      const matchGuru = filterGuru === "__all__" || guruCabangIds(filterGuru).includes(a.cabang_id);
+      return matchCabang && matchGuru;
+    });
 
   return (
     <div className="space-y-6">
@@ -91,6 +111,23 @@ export default function Agenda() {
           </div>
         </div>
         {canWrite && <Button onClick={openCreate} className="rounded-xl gap-2" data-testid="agenda-add-btn"><Plus className="h-4 w-4" /> Buat Agenda</Button>}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={filterCabang} onValueChange={setFilterCabang}>
+          <SelectTrigger className="w-[180px] rounded-xl" data-testid="agenda-filter-cabang"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Semua Cabang</SelectItem>
+            {cabang.map((c) => <SelectItem key={c.id} value={c.id}>{c.kota}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filterGuru} onValueChange={setFilterGuru}>
+          <SelectTrigger className="w-[200px] rounded-xl" data-testid="agenda-filter-guru"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Semua Guru Pembimbing</SelectItem>
+            {guru.map((g) => <SelectItem key={g.id} value={g.id}>{g.nama}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {loading ? (
@@ -115,7 +152,7 @@ export default function Agenda() {
                 <p className="flex items-center gap-2"><MapPin className="h-4 w-4 text-primary" /> {a.lokasi}</p>
               </div>
               <p className="text-sm text-muted-foreground mt-3 line-clamp-2">{a.deskripsi}</p>
-              <Button onClick={() => { setBroadcast(a); setBcCabang("__all__"); }}
+              <Button onClick={() => { setBroadcast(a); setBcCabang("__all__"); setBcGuru("__all__"); }}
                 className="w-full mt-4 rounded-xl gap-2 bg-[#25D366] hover:bg-[#20bd5a]" data-testid="agenda-broadcast-btn">
                 <MessageCircle className="h-4 w-4" /> Kirim Broadcast WhatsApp
               </Button>
@@ -165,15 +202,27 @@ export default function Agenda() {
               <p className="font-semibold text-charcoal">{broadcast?.judul}</p>
               <p className="text-muted-foreground mt-1">Pesan undangan akan otomatis tersusun untuk tiap jamaah.</p>
             </div>
-            <div>
-              <Label className="mb-1.5 block text-sm">Filter Jamaah per Cabang</Label>
-              <Select value={bcCabang} onValueChange={setBcCabang}>
-                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Semua Cabang</SelectItem>
-                  {cabang.map((c) => <SelectItem key={c.id} value={c.id}>{c.kota}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="mb-1.5 block text-sm">Filter Jamaah per Cabang</Label>
+                <Select value={bcCabang} onValueChange={setBcCabang}>
+                  <SelectTrigger className="rounded-xl" data-testid="broadcast-filter-cabang"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Semua Cabang</SelectItem>
+                    {cabang.map((c) => <SelectItem key={c.id} value={c.id}>{c.kota}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="mb-1.5 block text-sm">Filter Jamaah per Guru Pembimbing</Label>
+                <Select value={bcGuru} onValueChange={setBcGuru}>
+                  <SelectTrigger className="rounded-xl" data-testid="broadcast-filter-guru"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Semua Guru Pembimbing</SelectItem>
+                    {guru.map((g) => <SelectItem key={g.id} value={g.id}>{g.nama}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="h-4 w-4" /> {filteredJamaah.length} jamaah menjadi target broadcast

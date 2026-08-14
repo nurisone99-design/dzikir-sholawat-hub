@@ -1273,6 +1273,7 @@ COLUMN_TITLE_MAP = {
     "ijazah_kitab": "Ijazah Kitab",
     "ijazah_amaliah": "Ijazah Amaliah",
     "ijazah_nama_dalam": "Ijazah Nama Dalam",
+    "guru_pembimbing_nama": "Guru Pembimbing",
     "ketua": "Ketua",
     "jabatan": "Jabatan",
     "judul": "Judul",
@@ -1302,7 +1303,7 @@ DEFAULT_COLUMNS = {
 }
 
 EXPORT_FIELDS = {
-    "jamaah": ["id", "id_jamaah", "nama", "nik", "no_ktp", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "cabang_nama", "no_hp", "nama_ortu", "nama_orang_tua", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
+    "jamaah": ["id", "id_jamaah", "nama", "nik", "no_ktp", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "cabang", "cabang_nama", "guru_pembimbing_nama", "no_hp", "nama_ortu", "nama_orang_tua", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "cabang": ["id_cabang", "kota", "alamat", "ketua", "no_hp"],
     "guru": ["id_guru", "nama", "cabang_nama", "jumlah_jamaah", "no_hp", "alamat", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"],
     "pengurus": ["id_pengurus", "nama", "jabatan", "cabang_nama", "alamat", "no_hp"],
@@ -1314,6 +1315,10 @@ EXPORT_FIELDS = {
 EXPORT_PRESETS = {
     "jamaah": [
         {"key": "default", "label": "Default", "fields": DEFAULT_COLUMNS["jamaah"]},
+        {"key": "data_lengkap", "label": "Data Lengkap", "fields": ["id_jamaah", "nama", "nik", "tempat_lahir", "tanggal_lahir", "gender", "alamat", "no_hp", "cabang_nama", "guru_pembimbing_nama", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"]},
+        {"key": "data_identitas", "label": "Data Identitas", "fields": ["id_jamaah", "nama", "nik", "tempat_lahir", "tanggal_lahir", "gender", "alamat"]},
+        {"key": "data_kontak", "label": "Data Kontak", "fields": ["id_jamaah", "nama", "no_hp", "cabang_nama", "guru_pembimbing_nama"]},
+        {"key": "data_spiritual", "label": "Data Spiritual/Ijazah", "fields": ["id_jamaah", "nama", "guru_pembimbing_nama", "ijazah_kitab", "ijazah_amaliah", "ijazah_nama_dalam"]},
         {"key": "data_dasar", "label": "Data Dasar", "fields": ["nama", "gender", "tempat_lahir", "tanggal_lahir", "alamat", "no_hp"]},
         {"key": "data_keanggotaan", "label": "Data Keanggotaan", "fields": ["id_jamaah", "nama", "cabang_nama", "ijazah_kitab", "ijazah_amaliah"]},
         {"key": "usulan_nama_dalam", "label": "Usulan Nama Dalam", "fields": ["gender", "nama", "nama_orang_tua", "ijazah_nama_dalam"]},
@@ -1427,9 +1432,13 @@ async def build_rows(entity: str, filters: dict):
 
     guru_docs = await db.guru.find().to_list(1000) if entity == "jamaah" else []
     guru_map = {str(g["_id"]): g.get("nama") or "-" for g in guru_docs}
-    cabang_guru_map = {
-        str(c["_id"]): str(c.get("guru_id") or "") for c in cabang_docs
-    }
+    # Relasi Cabang <-> Guru yang benar ada di Guru.cabang_ids (reverse lookup),
+    # bukan Cabang.guru_id yang tidak pernah diisi lewat form Data Guru.
+    cabang_guru_map: Dict[str, List[str]] = {}
+    for g in guru_docs:
+        cids = g.get("cabang_ids") or ([g["cabang_id"]] if g.get("cabang_id") else [])
+        for cid in cids:
+            cabang_guru_map.setdefault(str(cid), []).append(g.get("nama") or "-")
 
     docs = await db[entity].find(filters).to_list(100000)
     rows = []
@@ -1449,15 +1458,43 @@ async def build_rows(entity: str, filters: dict):
             # Untuk entitas non-cabang, id_cabang dipakai sebagai label nama cabang.
             # Untuk entitas cabang sendiri, id_cabang harus tetap ID aslinya (lihat di atas).
             d["id_cabang"] = nama_kota
-        guru_id = str(d.get("guru_id") or cabang_guru_map.get(raw_c) or "")
-        d["guru_pembimbing_nama"] = guru_map.get(guru_id, d.get("guru_pembimbing_nama") or "-")
+
+        guru_id = str(d.get("guru_id") or "")
+        if guru_id and guru_id in guru_map:
+            d["guru_pembimbing_nama"] = guru_map[guru_id]
+        else:
+            names = cabang_guru_map.get(raw_c, [])
+            d["guru_pembimbing_nama"] = ", ".join(names) if names else (d.get("guru_pembimbing_nama") or "-")
 
         rows.append(d)
 
     return rows
 
 
-async def export_query(entity: str, user: dict, requested_branch: Optional[str], gender: Optional[str]) -> dict:
+# Entitas yang mempunyai referensi cabang_id sehingga dapat difilter berdasarkan
+# Guru Pembimbing lewat relasi Guru.cabang_ids (bukan entitas Guru itu sendiri).
+GURU_FILTERABLE_ENTITIES = {"jamaah", "cabang", "pengurus", "agenda", "galeri", "pengumuman"}
+
+
+async def _guru_cabang_ids(guru_id: str) -> List[str]:
+    """Resolve daftar cabang_id yang dibimbing seorang Guru, dari Guru.cabang_ids
+    (atau Guru.cabang_id lama) — relasi existing, bukan Cabang.guru_id."""
+    if not ObjectId.is_valid(guru_id):
+        return []
+    guru_doc = await db.guru.find_one({"_id": ObjectId(guru_id)})
+    if not guru_doc:
+        return []
+    cids = guru_doc.get("cabang_ids") or ([guru_doc["cabang_id"]] if guru_doc.get("cabang_id") else [])
+    return [str(c) for c in cids]
+
+
+async def export_query(
+    entity: str,
+    user: dict,
+    requested_branch: Optional[str],
+    gender: Optional[str],
+    guru_id: Optional[str] = None,
+) -> dict:
     scope = await valid_branch_scope(user)
     branch_owned = {"jamaah", "guru", "pengurus", "pengumuman"}
 
@@ -1487,6 +1524,22 @@ async def export_query(entity: str, user: dict, requested_branch: Optional[str],
         if g_str.lower() not in {"all", "", "null", "undefined", "none"}:
             gender_filter = {"gender": {"$regex": f"^{g_str}$", "$options": "i"}}
             filters = {"$and": [filters, gender_filter]} if filters else gender_filter
+
+    if guru_id and entity in GURU_FILTERABLE_ENTITIES:
+        gu_str = str(guru_id).strip()
+        if gu_str.lower() not in {"all", "", "null", "undefined", "none"}:
+            cabang_ids = await _guru_cabang_ids(gu_str)
+            if entity == "cabang":
+                or_conditions = [{"_id": ObjectId(c)} for c in cabang_ids if ObjectId.is_valid(c)]
+            else:
+                or_conditions = []
+                for c in cabang_ids:
+                    or_conditions.append({"cabang_id": c})
+                    or_conditions.append({"cabang": c})
+            # $or kosong (mis. Guru tanpa cabang_ids) sengaja tidak match apa pun.
+            guru_filter = {"$or": or_conditions}
+            # Selalu AND dengan filter yang sudah ada (scope cabang tetap wajib untuk role branch-scoped).
+            filters = {"$and": [filters, guru_filter]} if filters else guru_filter
     return filters
 
 
@@ -1498,11 +1551,12 @@ def usulan_document_headers(rows: List[dict]) -> tuple[str, str]:
     return branch_label, teacher_label
 
 @api_router.get("/export/{entity}")
-async def export_data(entity: str, 
+async def export_data(entity: str,
                       format: str = Query("xlsx"),
                       cabang: Optional[str] = Query(None),
                       cabang_id: Optional[str] = Query(None),
                       gender: Optional[str] = Query(None),
+                      guru_id: Optional[str] = Query(None),
                       columns: Optional[str] = Query(None),
                       fields: Optional[str] = None,
                       preset: Optional[str] = None,
@@ -1522,7 +1576,7 @@ async def export_data(entity: str,
 
     if format not in {"xlsx", "pdf"}:
         raise HTTPException(status_code=400, detail="Format export tidak valid")
-    filters = await export_query(entity, user, cabang or cabang_id, gender)
+    filters = await export_query(entity, user, cabang or cabang_id, gender, guru_id)
     rows = await build_rows(entity, filters)
     active_keys = parse_export_fields(fields or columns, entity, preset)
     headers = [COLUMN_TITLE_MAP.get(k, k.replace("_", " ").title()) for k in active_keys]

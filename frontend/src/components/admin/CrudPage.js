@@ -515,6 +515,7 @@ export default function CrudPage({
               lat: form[f.latKey || "lat"],
               lng: form[f.lngKey || "lng"],
             }}
+            address={f.addressKey ? form[f.addressKey] : undefined}
             onChange={({ lat, lng }) =>
               setForm((p) => ({
                 ...p,
@@ -671,7 +672,7 @@ export default function CrudPage({
         open={open}
         onOpenChange={(next) => {
           // Cegah modal ditutup akibat klik di luar/backdrop — hanya boleh
-          // ditutup lewat tombol Batal/Simpan/X eksplisit di bawah.
+          // ditutup lewat tombol Batal atau Simpan di bawah.
           if (next) setOpen(true);
         }}
       >
@@ -679,6 +680,7 @@ export default function CrudPage({
           className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
+          hideClose
         >
           <DialogHeader>
             <DialogTitle className="font-display text-xl">

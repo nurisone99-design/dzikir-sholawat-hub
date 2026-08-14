@@ -30,8 +30,12 @@ export default function Laporan() {
   const entities = ENTITIES.filter((e) => canExportEntity(user?.role, e.value));
   const [entity, setEntity] = useState(entities[0]?.value || "jamaah");
   const [cabang, setCabang] = useState([]);
+  const [guru, setGuru] = useState([]);
   const [cabangId, setCabangId] = useState("__all__");
+  const [guruId, setGuruId] = useState("__all__");
   const [gender, setGender] = useState("__all__");
+  const [presets, setPresets] = useState([]);
+  const [preset, setPreset] = useState("default");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -40,18 +44,42 @@ export default function Laporan() {
       .then((r) => setCabang(r.data))
       .catch((err) => {
         console.error("Gagal memuat data cabang:", err);
-
         setCabang([]);
       });
+    api
+      .get("/guru")
+      .then((r) => setGuru(r.data))
+      .catch((err) => {
+        console.error("Gagal memuat data guru:", err);
+        setGuru([]);
+      });
   }, []);
+
+  useEffect(() => {
+    api
+      .get(`/export/fields/${entity}`)
+      .then((r) => {
+        const list = r.data?.presets || [];
+        setPresets(list);
+        setPreset(list[0]?.key || "default");
+      })
+      .catch((err) => {
+        console.error("Gagal memuat preset laporan:", err);
+        setPresets([]);
+        setPreset("default");
+      });
+  }, [entity]);
 
   const doExport = async (format) => {
     setBusy(true);
     try {
       const params = new URLSearchParams({ format });
       if (cabangId !== "__all__") params.append("cabang_id", cabangId);
+      if (entity !== "guru" && guruId !== "__all__")
+        params.append("guru_id", guruId);
       if (entity === "jamaah" && gender !== "__all__")
         params.append("gender", gender);
+      if (preset) params.append("preset", preset);
       toast.loading("Menyiapkan laporan...", { id: "rpt" });
       const res = await api.get(`/export/${entity}?${params.toString()}`, {
         responseType: "blob",
@@ -103,6 +131,7 @@ export default function Laporan() {
               onValueChange={(v) => {
                 setEntity(v);
                 setCabangId("__all__");
+                setGuruId("__all__");
                 setGender("__all__");
               }}
             >
@@ -121,6 +150,26 @@ export default function Laporan() {
               </SelectContent>
             </Select>
           </div>
+          {presets.length > 0 && (
+            <div>
+              <Label className="mb-1.5 block text-sm">Preset Kolom</Label>
+              <Select value={preset} onValueChange={setPreset}>
+                <SelectTrigger
+                  className="rounded-xl"
+                  data-testid="laporan-preset"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((p) => (
+                    <SelectItem key={p.key} value={p.key}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {entity !== "cabang" && (
             <div>
               <Label className="mb-1.5 block text-sm">Cabang</Label>
@@ -136,6 +185,27 @@ export default function Laporan() {
                   {cabang.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.kota}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {entity !== "guru" && (
+            <div>
+              <Label className="mb-1.5 block text-sm">Guru Pembimbing</Label>
+              <Select value={guruId} onValueChange={setGuruId}>
+                <SelectTrigger
+                  className="rounded-xl"
+                  data-testid="laporan-guru"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Semua Guru</SelectItem>
+                  {guru.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.nama}
                     </SelectItem>
                   ))}
                 </SelectContent>

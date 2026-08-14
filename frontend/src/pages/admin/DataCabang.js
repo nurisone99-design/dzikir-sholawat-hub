@@ -63,6 +63,7 @@ export default function DataCabang() {
           type: "map",
           latKey: "lat",
           lngKey: "lng",
+          addressKey: "alamat",
         },
       ]}
     />

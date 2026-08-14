@@ -24,15 +24,35 @@ export default function GaleriAdmin() {
   const { isViewer } = useAuth();
   const canWrite = !isViewer;
   const [rows, setRows] = useState([]);
+  const [cabang, setCabang] = useState([]);
+  const [guru, setGuru] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const [delTarget, setDelTarget] = useState(null);
+  const [filterCabang, setFilterCabang] = useState("__all__");
+  const [filterGuru, setFilterGuru] = useState("__all__");
+
+  // Relasi Guru -> Cabang yang benar ada di Guru.cabang_ids (bukan Cabang.guru_id).
+  const guruCabangIds = (guruId) => {
+    const g = guru.find((x) => x.id === guruId);
+    if (!g) return [];
+    return g.cabang_ids || (g.cabang_id ? [g.cabang_id] : []);
+  };
+
+  const filteredRows = rows.filter((r) => {
+    const matchCabang = filterCabang === "__all__" || r.cabang_id === filterCabang;
+    const matchGuru = filterGuru === "__all__" || guruCabangIds(filterGuru).includes(r.cabang_id);
+    return matchCabang && matchGuru;
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const { data } = await api.get("/galeri"); setRows(data); }
+    try {
+      const [g, c, gu] = await Promise.all([api.get("/galeri"), api.get("/cabang"), api.get("/guru")]);
+      setRows(g.data); setCabang(c.data); setGuru(gu.data);
+    }
     catch (e) { toast.error(apiError(e.response?.data?.detail)); }
     finally { setLoading(false); }
   }, []);
@@ -74,11 +94,28 @@ export default function GaleriAdmin() {
         {canWrite && <Button onClick={openCreate} className="rounded-xl gap-2" data-testid="galeri-add-btn"><Plus className="h-4 w-4" /> Tambah Media</Button>}
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={filterCabang} onValueChange={setFilterCabang}>
+          <SelectTrigger className="w-[180px] rounded-xl" data-testid="galeri-filter-cabang"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Semua Cabang</SelectItem>
+            {cabang.map((c) => <SelectItem key={c.id} value={c.id}>{c.kota}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filterGuru} onValueChange={setFilterGuru}>
+          <SelectTrigger className="w-[200px] rounded-xl" data-testid="galeri-filter-guru"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Semua Guru Pembimbing</SelectItem>
+            {guru.map((g) => <SelectItem key={g.id} value={g.id}>{g.nama}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
       {loading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-square rounded-2xl" />)}</div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {rows.map((r) => (
+          {filteredRows.map((r) => (
             <div key={r.id} className="premium-card overflow-hidden group" data-testid="galeri-admin-item">
               <div className="relative aspect-square">
                 <img src={r.url} alt={r.judul} className="w-full h-full object-cover" />
@@ -104,7 +141,7 @@ export default function GaleriAdmin() {
               </div>
             </div>
           ))}
-          {rows.length === 0 && <p className="text-muted-foreground col-span-full">Belum ada media.</p>}
+          {filteredRows.length === 0 && <p className="text-muted-foreground col-span-full">Belum ada media.</p>}
         </div>
       )}
 

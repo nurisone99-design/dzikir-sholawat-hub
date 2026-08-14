@@ -245,7 +245,8 @@ export default function DataJamaah() {
         subtitle="Kelola data jamaah beserta pelacakan ijazah spiritual"
         endpoint="jamaah"
         icon={Users}
-        exportEntity="jamaah"
+        // Export Data Jamaah tersedia lewat menu "Laporan & Export", bukan tombol
+        // Excel/PDF di halaman ini — lihat pages/admin/Laporan.js.
         searchKeys={[
           "id_jamaah",
           "nama",

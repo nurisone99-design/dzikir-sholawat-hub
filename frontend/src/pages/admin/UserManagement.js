@@ -17,16 +17,22 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShieldCheck, Plus } from "lucide-react";
 
+// Penerus Ilmu & Ketua Yayasan sengaja tidak lagi ditawarkan di form Tambah/Edit
+// User — keduanya sudah diwakili oleh role gabungan Viewer 1. User lama dengan
+// role ini di database TIDAK diubah/dimigrasi; ROLE_LABEL tetap mengenalinya
+// (mis. untuk kolom "Hak Akses" di tabel) walau tidak lagi bisa dipilih di form.
 const ROLES = [
   { value: "super_admin", label: "Super Admin" },
   { value: "admin_cabang", label: "Admin Cabang" },
   { value: "viewer", label: "Viewer" },
   { value: "viewer_1", label: "Viewer 1" },
   { value: "viewer_2", label: "Viewer 2" },
-  { value: "penerus_ilmu", label: "Penerus Ilmu" },
-  { value: "ketua_yayasan", label: "Ketua Yayasan" },
 ];
-const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.value, r.label]));
+const ROLE_LABEL = {
+  ...Object.fromEntries(ROLES.map((r) => [r.value, r.label])),
+  penerus_ilmu: "Penerus Ilmu",
+  ketua_yayasan: "Ketua Yayasan",
+};
 
 export default function UserManagement() {
   const { isSuper } = useAuth();
@@ -121,6 +127,7 @@ export default function UserManagement() {
         <DialogContent
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
+          hideClose
         >
           <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} User</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">

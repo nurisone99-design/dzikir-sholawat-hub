@@ -148,7 +148,7 @@ async def response_bytes(response):
 def make_export(entity, user, **overrides):
     params = {
         "format": "xlsx", "cabang": None, "cabang_id": None,
-        "gender": None, "columns": None, "fields": None, "preset": None,
+        "gender": None, "guru_id": None, "columns": None, "fields": None, "preset": None,
         "user": user,
     }
     params.update(overrides)

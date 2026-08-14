@@ -208,6 +208,7 @@ class TestGlobalReadonlyOperationalReads:
                 cabang=None,
                 cabang_id=None,
                 gender=None,
+                guru_id=None,
                 columns=None,
                 user=actor(role),
             )

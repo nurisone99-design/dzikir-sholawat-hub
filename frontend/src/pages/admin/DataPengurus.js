@@ -33,7 +33,8 @@ export default function DataPengurus() {
         subtitle="Kelola susunan pengurus yayasan & majelis"
         endpoint="pengurus"
         icon={UserCog}
-        exportEntity="pengurus"
+        // Export Data Pengurus tersedia lewat menu "Laporan & Export", bukan tombol
+        // Excel/PDF di halaman ini — lihat pages/admin/Laporan.js.
         searchKeys={["id_pengurus", "nama", "jabatan"]}
         lookups={[{ key: "cabang_id", from: "cabang", labelKey: "kota" }]}
         filters={[{ key: "cabang_id", label: "Cabang", optionsFrom: "cabang" }]}
