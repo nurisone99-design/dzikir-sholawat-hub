@@ -1,21 +1,32 @@
 import { BACKEND_URL } from "@/lib/api";
 import React, { useState } from "react";
 import CrudPage from "@/components/admin/CrudPage";
-import { GraduationCap, User, Phone, MapPin, Building, BookOpen, FileText } from "lucide-react";
+import {
+  GraduationCap,
+  User,
+  Phone,
+  MapPin,
+  Building,
+  BookOpen,
+  FileText,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 
 const KITAB = [
-  "Kitab Ratib Al-Haddad",
-  "Kitab Dalail Khairat",
-  "Kitab Simtud Duror",
-  "Kitab Maulid Barzanji",
+  "Kitab Awaluddin",
+  "Kitab Makam Wilayah",
+  "Kitab Nun",
+  "Kitab Adam Hawa",
+  "Kitab Babul Hikmah",
+  "Kitab Laduni Alam Barzah",
 ];
+
 const AMALIAH = [
-  "Amaliah Istighosah",
-  "Amaliah Sholawat Nariyah",
-  "Amaliah Dzikir Asma",
-  "Amaliah Ratib",
+  "Amaliah Rahmatillah",
+  "Amaliah Suluk",
+  "Amaliah 3 Kedalam Khusus",
+  "Amaliah Ramadhan",
 ];
 
 const computeGuruId = (form, rows) =>
@@ -206,7 +217,9 @@ export default function DataGuru() {
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                   <div>
-                    <span className="text-xs text-slate-400">Alamat Lengkap</span>
+                    <span className="text-xs text-slate-400">
+                      Alamat Lengkap
+                    </span>
                     <p className="font-medium text-slate-800">
                       {selectedGuru.alamat || "-"}
                     </p>
@@ -226,12 +239,15 @@ export default function DataGuru() {
 
                 <div className="pt-3 border-t border-slate-100">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1 mb-2.5">
-                    <BookOpen className="w-3.5 h-3.5 text-emerald-600" /> Ijazah Spiritual
+                    <BookOpen className="w-3.5 h-3.5 text-emerald-600" /> Ijazah
+                    Spiritual
                   </span>
 
                   <div className="space-y-3 text-xs">
                     <div>
-                      <p className="text-slate-400 mb-1 font-medium">Ijazah Kitab:</p>
+                      <p className="text-slate-400 mb-1 font-medium">
+                        Ijazah Kitab:
+                      </p>
                       <div className="flex flex-wrap gap-1">
                         {Array.isArray(selectedGuru.ijazah_kitab) &&
                         selectedGuru.ijazah_kitab.length > 0 ? (
@@ -251,7 +267,9 @@ export default function DataGuru() {
                     </div>
 
                     <div>
-                      <p className="text-slate-400 mb-1 font-medium">Ijazah Amaliah:</p>
+                      <p className="text-slate-400 mb-1 font-medium">
+                        Ijazah Amaliah:
+                      </p>
                       <div className="flex flex-wrap gap-1">
                         {Array.isArray(selectedGuru.ijazah_amaliah) &&
                         selectedGuru.ijazah_amaliah.length > 0 ? (
@@ -271,7 +289,9 @@ export default function DataGuru() {
                     </div>
 
                     <div>
-                      <p className="text-slate-400 mb-1 font-medium">Ijazah Nama Dalam:</p>
+                      <p className="text-slate-400 mb-1 font-medium">
+                        Ijazah Nama Dalam:
+                      </p>
                       <div className="flex flex-wrap gap-1">
                         {Array.isArray(selectedGuru.ijazah_nama_dalam) &&
                         selectedGuru.ijazah_nama_dalam.length > 0 ? (
