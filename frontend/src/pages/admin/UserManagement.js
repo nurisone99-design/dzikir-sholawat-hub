@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -129,7 +129,12 @@ export default function UserManagement() {
           onInteractOutside={(e) => e.preventDefault()}
           hideClose
         >
-          <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} User</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} User</DialogTitle>
+            <DialogDescription className="sr-only">
+              {editing ? "Ubah detail akun pengguna" : "Tambahkan akun pengguna baru"}
+            </DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Username *</Label><Input value={form.username || ""} onChange={(e) => setForm({ ...form, username: e.target.value })} className="rounded-xl" data-testid="users-field-username" /></div>
             <div>

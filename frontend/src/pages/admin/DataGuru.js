@@ -10,7 +10,9 @@ import {
   BookOpen,
   FileText,
 } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 
 const KITAB = [
@@ -165,6 +167,10 @@ export default function DataGuru() {
       {/* Pop-up Kartu Detail Guru */}
       <Dialog open={!!selectedGuru} onOpenChange={() => setSelectedGuru(null)}>
         <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-0 shadow-2xl">
+          <DialogTitle className="sr-only">Detail Guru</DialogTitle>
+          <DialogDescription className="sr-only">
+            Kartu informasi lengkap guru pembimbing.
+          </DialogDescription>
           {selectedGuru && (
             <div className="bg-white">
               <div className="bg-gradient-to-r from-emerald-700 to-teal-800 p-6 text-white relative">

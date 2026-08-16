@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import CrudPage from "@/components/admin/CrudPage";
 import { UserCog, User, Phone, MapPin, Building, Briefcase } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import api from "@/lib/api";
 
 const computePengurusId = (form, rows) =>
@@ -108,6 +110,10 @@ export default function DataPengurus() {
         onOpenChange={() => setSelectedPengurus(null)}
       >
         <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-0 shadow-2xl">
+          <DialogTitle className="sr-only">Detail Pengurus</DialogTitle>
+          <DialogDescription className="sr-only">
+            Kartu informasi lengkap pengurus.
+          </DialogDescription>
           {selectedPengurus && (
             <div className="bg-white">
               <div className="bg-gradient-to-r from-emerald-700 to-teal-800 p-6 text-white relative">

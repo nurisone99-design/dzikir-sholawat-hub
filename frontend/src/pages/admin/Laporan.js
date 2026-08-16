@@ -526,14 +526,14 @@ export default function Laporan() {
       </div>
 
       <div className="premium-card p-6 max-w-3xl bg-secondary/30">
-        <p className="text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           <Badge variant="secondary" className="mr-2">
             Info
           </Badge>
           {isGaleri
             ? "Pilih satu foto untuk diunduh sebagai JPEG, atau beberapa foto sekaligus untuk diunduh sebagai satu file ZIP berisi JPEG."
             : "Laporan PDF menyertakan kop resmi Yayasan Raudhatul Jannah dengan desain rapi siap cetak. Laporan Excel dapat diolah lebih lanjut untuk kebutuhan administrasi."}
-        </p>
+        </div>
       </div>
     </div>
   );

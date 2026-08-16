@@ -10,7 +10,9 @@ import {
   Building,
   BookOpen,
 } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import api from "@/lib/api";
 
 const BACKEND_URL =
@@ -259,6 +261,10 @@ export default function DataJamaah() {
         onOpenChange={() => setSelectedJamaah(null)}
       >
         <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-0 shadow-2xl">
+          <DialogTitle className="sr-only">Detail Jamaah</DialogTitle>
+          <DialogDescription className="sr-only">
+            Kartu informasi lengkap jamaah.
+          </DialogDescription>
           {selectedJamaah && (
             <div className="bg-white">
               {/* Header Kartu */}

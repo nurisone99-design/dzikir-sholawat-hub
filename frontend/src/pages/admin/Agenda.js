@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -186,7 +186,12 @@ export default function Agenda() {
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Buat"} Agenda</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{editing ? "Edit" : "Buat"} Agenda</DialogTitle>
+            <DialogDescription className="sr-only">
+              {editing ? "Ubah detail agenda" : "Buat agenda baru"}
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Judul Agenda *</Label><Input value={form.judul || ""} onChange={(e) => setForm({ ...form, judul: e.target.value })} className="rounded-xl" data-testid="agenda-field-judul" /></div>
             <div className="grid grid-cols-2 gap-4">
@@ -213,7 +218,12 @@ export default function Agenda() {
       {/* Broadcast dialog */}
       <Dialog open={!!broadcast} onOpenChange={(o) => !o && setBroadcast(null)}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="font-display text-xl flex items-center gap-2"><MessageCircle className="h-5 w-5 text-[#25D366]" /> Broadcast WhatsApp</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl flex items-center gap-2"><MessageCircle className="h-5 w-5 text-[#25D366]" /> Broadcast WhatsApp</DialogTitle>
+            <DialogDescription className="sr-only">
+              Kirim undangan agenda melalui broadcast WhatsApp ke jamaah.
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="rounded-xl bg-secondary/50 p-4 text-sm">
               <p className="font-semibold text-charcoal">{broadcast?.judul}</p>

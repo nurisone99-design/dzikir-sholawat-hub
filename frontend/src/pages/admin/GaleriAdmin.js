@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -152,7 +152,12 @@ export default function GaleriAdmin() {
           onInteractOutside={(e) => e.preventDefault()}
           hideClose
         >
-          <DialogHeader><DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} Media</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{editing ? "Edit" : "Tambah"} Media</DialogTitle>
+            <DialogDescription className="sr-only">
+              {editing ? "Ubah detail media galeri" : "Tambahkan media baru ke galeri"}
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label className="mb-1.5 block text-sm">Judul *</Label><Input value={form.judul || ""} onChange={(e) => setForm({ ...form, judul: e.target.value })} className="rounded-xl" data-testid="galeri-field-judul" /></div>
             <div className="grid grid-cols-2 gap-4">
